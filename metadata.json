@@ -1,14 +1,14 @@
 {
-  "name": "SkeletonApp",
-  "description": "A minimal skeleton app for the Hyperware platform using the Hyperapp framework - demonstrates basic state management and HTTP endpoints",
+  "name": "DAO Governance Portal",
+  "description": "A decentralized DAO governance portal with P2P committee consensus, CRDT-based state synchronization, and on-chain proposal management",
   "image": "",
   "properties": {
-    "package_name": "skeleton-app",
-    "current_version": "0.1.0",
-    "publisher": "skeleton.os",
+    "package_name": "governance",
+    "current_version": "1.0.0",
+    "publisher": "governance.os",
     "mirrors": [],
     "code_hashes": {
-      "0.1.0": ""
+      "1.0.0": ""
     },
     "wit_version": 1,
     "dependencies": []

@@ -1,58 +1,44 @@
-// Main App component for Skeleton App
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import './App.css';
-import { useSkeletonStore } from './store/skeleton';
+import { useGovernanceStore } from './store/governance';
+import { ProposalList } from './components/ProposalList';
+import { CreateProposal } from './components/CreateProposal';
+import { CommitteeStatus } from './components/CommitteeStatus';
+import { DaoInfo } from './components/DaoInfo';
 
 function App() {
-  // Store state and actions
-  const {
-    nodeId,
-    isConnected,
-    counter,
-    messages,
-    isLoading,
-    error,
-    initialize,
-    fetchStatus,
-    incrementCounter,
-    clearError,
-  } = useSkeletonStore();
+  const [activeTab, setActiveTab] = useState<'proposals' | 'create' | 'committee'>('proposals');
+  const { error, clearError, syncWithCommittee, isSyncing } = useGovernanceStore();
+  const [nodeId, setNodeId] = useState<string>('');
 
-
-  // Initialize on mount
   useEffect(() => {
-    initialize();
-  }, [initialize]);
-
-  // Auto-refresh status every 30 seconds if connected
-  useEffect(() => {
-    if (!isConnected) return;
+    if (typeof window !== 'undefined' && (window as any).our) {
+      setNodeId((window as any).our.node);
+    }
     
-    const interval = setInterval(() => {
-      fetchStatus();
-    }, 30000);
+    syncWithCommittee();
     
-    return () => clearInterval(interval);
-  }, [isConnected, fetchStatus]);
-
+    const syncInterval = setInterval(() => {
+      syncWithCommittee();
+    }, 60000);
+    
+    return () => clearInterval(syncInterval);
+  }, []);
 
   return (
     <div className="app">
-      {/* Header */}
       <header className="app-header">
-        <h1 className="app-title">🦴 Skeleton App</h1>
+        <h1 className="app-title">🏛️ DAO Governance Portal</h1>
         <div className="node-info">
-          {isConnected ? (
-            <>
-              Connected as <span className="node-id">{nodeId}</span>
-            </>
+          {nodeId ? (
+            <>Connected as <span className="node-id">{nodeId}</span></>
           ) : (
-            <span className="not-connected">Not connected to Hyperware</span>
+            <span className="not-connected">Connecting to Hyperware...</span>
           )}
         </div>
+        {isSyncing && <span className="sync-indicator">Syncing...</span>}
       </header>
 
-      {/* Error display */}
       {error && (
         <div className="error error-message">
           {error}
@@ -62,86 +48,51 @@ function App() {
         </div>
       )}
 
-      {/* Main content */}
-      {isConnected && (
-        <>
-          {/* Counter Section */}
-          <section className="section">
-            <h2 className="section-title">Counter Demo</h2>
-            <p>This demonstrates basic state management and HTTP endpoints.</p>
-            
-            <div className="counter-section">
-              <div className="counter-display">{counter}</div>
-              <div className="button-group">
-                <button 
-                  onClick={() => incrementCounter(1)} 
-                  disabled={isLoading}
-                >
-                  +1
-                </button>
-                <button 
-                  onClick={() => incrementCounter(5)} 
-                  disabled={isLoading}
-                >
-                  +5
-                </button>
-                <button 
-                  onClick={() => incrementCounter(10)} 
-                  disabled={isLoading}
-                >
-                  +10
-                </button>
-              </div>
-            </div>
-          </section>
+      <div className="main-container">
+        <div className="sidebar">
+          <DaoInfo />
+          <CommitteeStatus />
+        </div>
 
-          {/* Messages Section */}
-          <section className="section">
-            <h2 className="section-title">Messages</h2>
-            <p>Messages received by this node:</p>
-            
-            <div className="messages-list">
-              {messages.length > 0 ? (
-                messages.map((msg, index) => (
-                  <div key={index} className="message-item">
-                    {msg}
-                  </div>
-                ))
-              ) : (
-                <div className="no-messages">No messages yet</div>
-              )}
-            </div>
-            
-            <button onClick={fetchStatus} disabled={isLoading}>
-              {isLoading ? <span className="spinner" /> : 'Refresh'}
+        <div className="content">
+          <nav className="tabs">
+            <button 
+              className={activeTab === 'proposals' ? 'active' : ''}
+              onClick={() => setActiveTab('proposals')}
+            >
+              Proposals
             </button>
-          </section>
+            <button 
+              className={activeTab === 'create' ? 'active' : ''}
+              onClick={() => setActiveTab('create')}
+            >
+              Create Proposal
+            </button>
+            <button 
+              className={activeTab === 'committee' ? 'active' : ''}
+              onClick={() => setActiveTab('committee')}
+            >
+              Committee
+            </button>
+          </nav>
 
-
-          {/* Instructions */}
-          <section className="section">
-            <h2 className="section-title">How to Use This Skeleton</h2>
-            <div style={{ textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
-              <p>This skeleton app demonstrates:</p>
-              <ul>
-                <li>Basic state management with a counter</li>
-                <li>HTTP communication between frontend and backend</li>
-                <li>Error handling and loading states</li>
-                <li>Persistent state across app restarts</li>
-              </ul>
-              
-              <p>To customize this app:</p>
-              <ol>
-                <li>Modify <code>AppState</code> in <code>lib.rs</code></li>
-                <li>Add new HTTP endpoints with <code>#[http]</code></li>
-                <li>Update the UI components and API calls</li>
-                <li>Build with <code>kit b --hyperapp</code></li>
-                <li>Test with <code>kit s</code></li>
-              </ol>
-            </div>
-          </section>
-        </>
-      )}
+          <div className="tab-content">
+            {activeTab === 'proposals' && <ProposalList />}
+            {activeTab === 'create' && <CreateProposal />}
+            {activeTab === 'committee' && (
+              <div className="committee-tab">
+                <h2>Committee Management</h2>
+                <CommitteeStatus />
+                <div className="committee-actions">
+                  <button onClick={syncWithCommittee} disabled={isSyncing}>
+                    {isSyncing ? 'Syncing...' : 'Force Sync'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

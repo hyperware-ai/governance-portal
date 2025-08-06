@@ -1,15 +1,13 @@
-// API utilities for communicating with the Hyperware backend
-
 import { BASE_URL } from '../types/global';
-import type { ApiCall } from '../types/skeleton';
 
-// Generic API call function
-// All HTTP endpoints in Hyperware use POST to /api
-export async function makeApiCall<TRequest, TResponse>(
-  call: ApiCall<TRequest>
+export async function makeApiCall<TResponse>(
+  call: Record<string, any>
 ): Promise<TResponse> {
   try {
-    const response = await fetch(`${BASE_URL}/api`, {
+    // For Hyperware apps, use a relative path 'api' (without leading slash)
+    // This ensures the API call is relative to the current app's base path
+    const apiUrl = BASE_URL || 'api';
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -30,37 +28,64 @@ export async function makeApiCall<TRequest, TResponse>(
   }
 }
 
-// Convenience functions for specific API calls
+export class GovernanceAPI {
+  static async ready(): Promise<{ ready: boolean }> {
+    return makeApiCall({ Ready: null });
+  }
 
-export async function getStatus() {
-  // For methods with no parameters, pass empty string
-  const response = await makeApiCall<string, any>({
-    GetStatus: "",
-  });
-  
-  // The response is already parsed JSON
-  return response;
+  static async getProposals(): Promise<{
+    onchain: any[];
+    drafts: any[];
+  }> {
+    return makeApiCall({ GetProposals: null });
+  }
+
+  static async createDraft(title: string, description: string): Promise<{
+    success: boolean;
+    draft_id: string;
+    draft: any;
+  }> {
+    return makeApiCall({ CreateDraft: { title, description } });
+  }
+
+  static async addDiscussion(
+    proposal_id: string,
+    content: string,
+    parent_id?: string
+  ): Promise<{
+    success: boolean;
+    discussion: any;
+  }> {
+    return makeApiCall({ 
+      AddDiscussion: {
+        proposal_id,
+        content,
+        parent_id: parent_id || null,
+      }
+    });
+  }
+
+  static async getCommitteeStatus(): Promise<{
+    members: string[];
+    is_member: boolean;
+    online_count: number;
+  }> {
+    return makeApiCall({ GetCommitteeStatus: null });
+  }
+
+  static async getVotingPowerInfo(): Promise<{
+    voting_power: string;
+    delegated_power: string;
+    total_supply: string;
+  }> {
+    return makeApiCall({ GetVotingPowerInfo: null });
+  }
+
+  static async requestJoinCommittee(targetNodes: string[]): Promise<string> {
+    return makeApiCall({ RequestJoinCommittee: targetNodes });
+  }
 }
 
-export async function incrementCounter(amount: number = 1) {
-  // For single parameter methods, pass the value directly
-  return makeApiCall<number, number>({
-    IncrementCounter: amount,
-  });
-}
-
-export async function getMessages() {
-  // This returns a JSON string that we need to parse
-  const response = await makeApiCall<string, string>({
-    GetMessages: "",
-  });
-  
-  // Parse the JSON string response
-  return JSON.parse(response) as string[];
-}
-
-
-// Error handling utilities
 export function isApiError(error: unknown): error is Error {
   return error instanceof Error;
 }

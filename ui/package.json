@@ -1,5 +1,5 @@
 {
-  "name": "skeleton-app-ui",
+  "name": "governance-ui",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,7 +13,12 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^4.5.5"
+    "zustand": "^4.5.5",
+    "@rainbow-me/rainbowkit": "^2.1.0",
+    "wagmi": "^2.5.0",
+    "viem": "^2.7.0",
+    "@tanstack/react-query": "^5.18.0",
+    "ethers": "^6.10.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

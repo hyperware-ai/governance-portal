@@ -1,19 +1,22 @@
 [
   {
-    "process_name": "skeleton-app",
-    "process_wasm_path": "/skeleton-app.wasm",
+    "process_name": "governance",
+    "process_wasm_path": "/governance-app.wasm",
     "on_exit": "Restart",
-    "request_networking": false,
+    "request_networking": true,
     "request_capabilities": [
       "homepage:homepage:sys",
       "http-server:distro:sys",
-      "vfs:distro:sys"
+      "vfs:distro:sys",
+      "sqlite:distro:sys",
+      "timer:distro:sys",
+      "eth:distro:sys"
     ],
     "grant_capabilities": [
       "homepage:homepage:sys",
       "http-server:distro:sys",
       "vfs:distro:sys"
     ],
-    "public": false
+    "public": true
   }
 ]
