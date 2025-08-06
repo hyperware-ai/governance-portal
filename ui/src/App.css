@@ -362,6 +362,413 @@
   margin-top: 2rem;
 }
 
+/* Proposal Detail Styles */
+.proposal-detail {
+  max-width: 900px;
+}
+
+.back-button {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.back-button:hover {
+  background: var(--surface-hover);
+  transform: translateX(-2px);
+}
+
+.proposal-meta {
+  display: flex;
+  gap: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 1rem 0;
+}
+
+/* Timeline Styles */
+.timeline {
+  position: relative;
+  padding-left: 2rem;
+  margin: 2rem 0;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-color);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 2rem;
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -1.5rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--border-color);
+}
+
+.timeline-item.completed .timeline-marker {
+  background: var(--success-color);
+  border-color: var(--success-color);
+}
+
+.timeline-item.pending .timeline-marker {
+  background: var(--warning-color);
+  border-color: var(--warning-color);
+}
+
+.timeline-item.inactive .timeline-marker {
+  background: var(--text-muted);
+  border-color: var(--text-muted);
+}
+
+.timeline-content {
+  padding-left: 1rem;
+}
+
+.timeline-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.timeline-block {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.timeline-tx {
+  font-size: 0.85rem;
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.timeline-tx:hover {
+  text-decoration: underline;
+}
+
+/* Voting Results */
+.vote-bars {
+  margin: 1.5rem 0;
+}
+
+.vote-bar {
+  margin-bottom: 1rem;
+}
+
+.vote-bar-label {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.vote-bar-track {
+  height: 2rem;
+  background: var(--surface);
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.vote-bar-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.vote-bar.for .vote-bar-fill {
+  background: var(--success-color);
+}
+
+.vote-bar.against .vote-bar-fill {
+  background: var(--error-color);
+}
+
+.vote-bar.abstain .vote-bar-fill {
+  background: var(--text-muted);
+}
+
+.vote-bar-value {
+  text-align: right;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
+}
+
+/* Quorum Status */
+.quorum-status {
+  margin-top: 2rem;
+  padding: 1rem;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.quorum-status h4 {
+  margin-top: 0;
+  color: var(--text-primary);
+}
+
+.quorum-bar {
+  height: 1rem;
+  background: var(--surface-hover);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  margin: 0.5rem 0;
+}
+
+.quorum-fill {
+  height: 100%;
+  background: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+/* Discussion Styles */
+.proposal-discussion {
+  margin-top: 3rem;
+}
+
+.comment-form {
+  background: var(--surface);
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  border: 1px solid var(--border-color);
+}
+
+.comment-form textarea {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.replying-to {
+  background: var(--info-bg);
+  color: var(--info-color);
+  padding: 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.comment {
+  background: var(--surface);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-color);
+}
+
+.comment-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.comment-author {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.comment-time {
+  color: var(--text-secondary);
+}
+
+.comment-content {
+  color: var(--text-primary);
+  line-height: 1.6;
+  margin-bottom: 0.5rem;
+}
+
+.comment-actions {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.comment-actions button {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.comment-actions button:hover {
+  text-decoration: underline;
+}
+
+.comment-votes {
+  color: var(--text-secondary);
+}
+
+/* Voting Panel */
+.voting-panel {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.voting-panel h3 {
+  margin-top: 0;
+  color: var(--primary-color);
+}
+
+.vote-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.vote-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vote-option:hover {
+  transform: translateX(4px);
+}
+
+.vote-option.selected {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+  color: white;
+}
+
+.vote-option.for.selected {
+  background: var(--success-color);
+  border-color: var(--success-color);
+}
+
+.vote-option.against.selected {
+  background: var(--error-color);
+  border-color: var(--error-color);
+}
+
+.vote-option.abstain.selected {
+  background: var(--text-muted);
+  border-color: var(--text-muted);
+}
+
+.vote-icon {
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+.vote-reason {
+  margin-bottom: 1rem;
+}
+
+.vote-reason label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.submit-vote {
+  width: 100%;
+  padding: 0.8rem;
+  font-weight: 600;
+}
+
+.voting-info {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+/* Proposal Actions */
+.proposal-actions {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.action-group {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: var(--card-bg);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.action-group h4 {
+  margin-top: 0;
+  color: var(--text-primary);
+}
+
+.remove-action {
+  background: var(--error-bg);
+  color: var(--error-color);
+  border: 1px solid var(--error-color);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.add-action {
+  background: var(--success-bg);
+  color: var(--success-color);
+  border: 1px solid var(--success-color);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.proposal-type-selector {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: var(--surface);
+  border-radius: 8px;
+}
+
+.proposal-type-selector label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.submitting-info {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .main-container {

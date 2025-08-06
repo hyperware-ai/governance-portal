@@ -2,7 +2,11 @@ import React from 'react';
 import { useGovernanceStore } from '../store/governance';
 import { ProposalStatus } from '../types/governance';
 
-export const ProposalList: React.FC = () => {
+interface ProposalListProps {
+  onSelectProposal?: (proposalId: string) => void;
+}
+
+export const ProposalList: React.FC<ProposalListProps> = ({ onSelectProposal }) => {
   const { proposals, drafts, isLoading, error, fetchProposals } = useGovernanceStore();
 
   React.useEffect(() => {
@@ -23,7 +27,11 @@ export const ProposalList: React.FC = () => {
       <div className="section">
         <h2>Active Proposals ({activeProposals.length})</h2>
         {activeProposals.map(proposal => (
-          <ProposalCard key={proposal.id} proposal={proposal} />
+          <ProposalCard 
+            key={proposal.id} 
+            proposal={proposal} 
+            onSelect={onSelectProposal}
+          />
         ))}
         {activeProposals.length === 0 && <p>No active proposals</p>}
       </div>
@@ -39,7 +47,11 @@ export const ProposalList: React.FC = () => {
       <div className="section">
         <h2>Pending ({pendingProposals.length})</h2>
         {pendingProposals.map(proposal => (
-          <ProposalCard key={proposal.id} proposal={proposal} />
+          <ProposalCard 
+            key={proposal.id} 
+            proposal={proposal}
+            onSelect={onSelectProposal}
+          />
         ))}
         {pendingProposals.length === 0 && <p>No pending proposals</p>}
       </div>
@@ -47,7 +59,11 @@ export const ProposalList: React.FC = () => {
       <div className="section">
         <h2>Completed ({completedProposals.length})</h2>
         {completedProposals.map(proposal => (
-          <ProposalCard key={proposal.id} proposal={proposal} />
+          <ProposalCard 
+            key={proposal.id} 
+            proposal={proposal}
+            onSelect={onSelectProposal}
+          />
         ))}
         {completedProposals.length === 0 && <p>No completed proposals</p>}
       </div>
@@ -55,14 +71,19 @@ export const ProposalList: React.FC = () => {
   );
 };
 
-const ProposalCard: React.FC<{ proposal: any }> = ({ proposal }) => {
+interface ProposalCardProps {
+  proposal: any;
+  onSelect?: (proposalId: string) => void;
+}
+
+const ProposalCard: React.FC<ProposalCardProps> = ({ proposal, onSelect }) => {
   const { castVote } = useGovernanceStore();
   
   return (
-    <div className="proposal-card">
+    <div className="proposal-card" onClick={() => onSelect?.(proposal.id)} style={{ cursor: onSelect ? 'pointer' : 'default' }}>
       <h3>{proposal.title || `Proposal #${proposal.id}`}</h3>
       <p className="proposer">by {proposal.proposer}</p>
-      <p className="description">{proposal.description}</p>
+      <p className="description">{proposal.description?.slice(0, 200)}...</p>
       <div className="status">
         <span className={`status-badge ${proposal.status.toLowerCase()}`}>
           {proposal.status}
@@ -76,9 +97,18 @@ const ProposalCard: React.FC<{ proposal: any }> = ({ proposal }) => {
         </div>
         {proposal.status === ProposalStatus.Active && (
           <div className="vote-buttons">
-            <button onClick={() => castVote(proposal.id, 'Yes' as any)}>Vote Yes</button>
-            <button onClick={() => castVote(proposal.id, 'No' as any)}>Vote No</button>
-            <button onClick={() => castVote(proposal.id, 'Abstain' as any)}>Abstain</button>
+            <button onClick={(e) => {
+              e.stopPropagation();
+              castVote(proposal.id, 'Yes' as any);
+            }}>Vote Yes</button>
+            <button onClick={(e) => {
+              e.stopPropagation();
+              castVote(proposal.id, 'No' as any);
+            }}>Vote No</button>
+            <button onClick={(e) => {
+              e.stopPropagation();
+              castVote(proposal.id, 'Abstain' as any);
+            }}>Abstain</button>
           </div>
         )}
       </div>

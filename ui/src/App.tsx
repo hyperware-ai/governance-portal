@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react';
 import './App.css';
+import '@rainbow-me/rainbowkit/styles.css';
+import { RainbowKitProvider, ConnectButton } from '@rainbow-me/rainbowkit';
+import { WagmiProvider, useAccount } from 'wagmi';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { config } from './config/wallet';
 import { useGovernanceStore } from './store/governance';
 import { ProposalList } from './components/ProposalList';
 import { CreateProposal } from './components/CreateProposal';
 import { CommitteeStatus } from './components/CommitteeStatus';
 import { DaoInfo } from './components/DaoInfo';
+import { ProposalDetail } from './components/ProposalDetail';
+import { VotingPanel } from './components/VotingPanel';
 
-function App() {
+const queryClient = new QueryClient();
+
+function AppContent() {
   const [activeTab, setActiveTab] = useState<'proposals' | 'create' | 'committee'>('proposals');
+  const [selectedProposal, setSelectedProposal] = useState<string | null>(null);
   const { error, clearError, syncWithCommittee, isSyncing } = useGovernanceStore();
   const [nodeId, setNodeId] = useState<string>('');
+  const { address, isConnected } = useAccount();
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).our) {
@@ -36,6 +47,9 @@ function App() {
             <span className="text-muted">Connecting to Hyperware...</span>
           )}
         </div>
+        <div style={{ marginTop: '1rem' }}>
+          <ConnectButton />
+        </div>
         {isSyncing && <span className="badge warning">Syncing...</span>}
       </header>
 
@@ -50,35 +64,61 @@ function App() {
 
       <div className="main-container">
         <div className="sidebar">
-          <DaoInfo />
+          <DaoInfo walletAddress={address} isConnected={isConnected} />
           <CommitteeStatus />
+          {selectedProposal && (
+            <VotingPanel 
+              proposalId={selectedProposal}
+              walletAddress={address}
+              isConnected={isConnected}
+            />
+          )}
         </div>
 
         <div className="content">
           <nav className="tabs">
             <button 
               className={`tab ${activeTab === 'proposals' ? 'active' : ''}`}
-              onClick={() => setActiveTab('proposals')}
+              onClick={() => {
+                setActiveTab('proposals');
+                setSelectedProposal(null);
+              }}
             >
               Proposals
             </button>
             <button 
               className={`tab ${activeTab === 'create' ? 'active' : ''}`}
-              onClick={() => setActiveTab('create')}
+              onClick={() => {
+                setActiveTab('create');
+                setSelectedProposal(null);
+              }}
             >
               Create Proposal
             </button>
             <button 
               className={`tab ${activeTab === 'committee' ? 'active' : ''}`}
-              onClick={() => setActiveTab('committee')}
+              onClick={() => {
+                setActiveTab('committee');
+                setSelectedProposal(null);
+              }}
             >
               Committee
             </button>
           </nav>
 
           <div className="tab-content">
-            {activeTab === 'proposals' && <ProposalList />}
-            {activeTab === 'create' && <CreateProposal />}
+            {activeTab === 'proposals' && !selectedProposal && (
+              <ProposalList onSelectProposal={setSelectedProposal} />
+            )}
+            {activeTab === 'proposals' && selectedProposal && (
+              <ProposalDetail 
+                proposalId={selectedProposal}
+                onBack={() => setSelectedProposal(null)}
+              />
+            )}
+            {activeTab === 'create' && (
+              <CreateProposal walletAddress={address} isConnected={isConnected} />
+            )}
             {activeTab === 'committee' && (
               <div className="committee-tab">
                 <h2>Committee Management</h2>
@@ -94,6 +134,18 @@ function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider>
+          <AppContent />
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
   );
 }
 

@@ -26,6 +26,11 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 rand = "0.8"
 
+# CRDT dependencies for distributed state synchronization
+# crdts = "7.0"  # Temporarily disabled - using simplified CRDT
+im = "15.1"  # Persistent data structures for CRDT
+hex = "0.4"
+
 # IMPORTANT: hyperprocess_macro provides async support and WIT generation
 [dependencies.hyperprocess_macro]
 git = "https://github.com/hyperware-ai/hyperprocess-macro"

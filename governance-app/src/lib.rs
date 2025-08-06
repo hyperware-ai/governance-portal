@@ -2,19 +2,25 @@ use hyperprocess_macro::*;
 use hyperware_process_lib::{
     our,
     homepage::add_to_homepage,
+    timer,
 };
-use hyperware_app_common::{send, SaveOptions};
+use hyperware_app_common::{send, source, SaveOptions};
 use hyperware_process_lib::{Request, Address};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
-// Simplified CRDT types - full crdts library integration would need custom serialization
 use chrono;
 use base64::{Engine as _, engine::general_purpose};
 use sha3::{Digest, Sha3_256};
 
-#[derive(Default, Serialize, Deserialize)]
+mod chain_indexer;
+mod storage;
+
+use chain_indexer::{ChainIndexer, ProposalEvent, process_proposal_event};
+use storage::FileStorage;
+
+#[derive(Serialize, Deserialize)]
 pub struct GovernanceState {
     last_indexed_block: u64,
     chain_id: u64,
@@ -35,6 +41,35 @@ pub struct GovernanceState {
     crdt_state: GovernanceCRDT,
     subscriptions: HashMap<String, Subscription>,
     peers: HashMap<String, PeerInfo>,
+    
+    #[serde(skip)]
+    chain_indexer: Option<ChainIndexer>,
+    #[serde(skip)]
+    storage: Option<FileStorage>,
+}
+
+impl Default for GovernanceState {
+    fn default() -> Self {
+        Self {
+            last_indexed_block: 0,
+            chain_id: 8453, // Base mainnet
+            governor_address: String::new(),
+            token_address: String::new(),
+            onchain_proposals: HashMap::new(),
+            committee_members: HashSet::new(),
+            proposal_drafts: HashMap::new(),
+            discussions: HashMap::new(),
+            is_committee_member: false,
+            is_indexing: false,
+            sync_peers: Vec::new(),
+            last_state_hash: String::new(),
+            crdt_state: GovernanceCRDT::default(),
+            subscriptions: HashMap::new(),
+            peers: HashMap::new(),
+            chain_indexer: None,
+            storage: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -488,11 +523,52 @@ impl GovernanceState {
     async fn initialize(&mut self) {
         add_to_homepage("DAO Governance", Some("🏛️"), Some("/"), None);
 
-        self.chain_id = 1;
+        self.chain_id = 8453; // Base mainnet
         self.governor_address = String::new();
         self.token_address = String::new();
         self.is_committee_member = false;
         self.is_indexing = false;
+        
+        // Initialize storage
+        match FileStorage::new() {
+            Ok(storage) => {
+                // Load saved state from storage
+                if let Ok(proposals) = storage.load_proposals() {
+                    self.onchain_proposals = proposals;
+                }
+                if let Ok(drafts) = storage.load_drafts() {
+                    self.proposal_drafts = drafts;
+                }
+                if let Ok(discussions) = storage.load_discussions() {
+                    self.discussions = discussions;
+                }
+                if let Ok(crdt) = storage.load_crdt_state() {
+                    self.crdt_state = crdt;
+                }
+                if let Ok(last_block) = storage.load_metadata() {
+                    self.last_indexed_block = last_block;
+                }
+                self.storage = Some(storage);
+            },
+            Err(e) => {
+                println!("Failed to initialize storage: {}", e);
+            }
+        }
+        
+        // Initialize chain indexer
+        match ChainIndexer::new().await {
+            Ok(indexer) => {
+                self.chain_indexer = Some(indexer);
+                // Start indexing timer - every 30 seconds
+                timer::set_timer(30000, Some(b"index_chain".to_vec()));
+            },
+            Err(e) => {
+                println!("Failed to initialize chain indexer: {}", e);
+            }
+        }
+        
+        // Start keepalive timer - every 60 seconds
+        timer::set_timer(60000, Some(b"keepalive".to_vec()));
 
         println!("DAO Governance Portal initialized on node: {}", our().node);
     }
@@ -734,5 +810,227 @@ impl GovernanceState {
         };
 
         Ok(serde_json::to_string(&proposals).unwrap())
+    }
+}
+
+// Helper methods implementation
+impl GovernanceState {
+    async fn handle_timer(&mut self, context: Option<Vec<u8>>) -> Result<(), String> {
+        if let Some(ctx) = context {
+            match ctx.as_slice() {
+                b"index_chain" => {
+                    self.index_chain().await?;
+                    // Schedule next indexing
+                    timer::set_timer(30000, Some(b"index_chain".to_vec()));
+                },
+                b"keepalive" => {
+                    self.send_keepalive().await?;
+                    // Schedule next keepalive
+                    timer::set_timer(60000, Some(b"keepalive".to_vec()));
+                },
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    
+    async fn index_chain(&mut self) -> Result<(), String> {
+        if self.is_indexing {
+            return Ok(());
+        }
+        
+        self.is_indexing = true;
+        
+        if let Some(indexer) = &mut self.chain_indexer {
+            // Index from last block to current
+            match indexer.index_proposals(self.last_indexed_block + 1, None).await {
+                Ok(events) => {
+                    // Process events
+                    for event in &events {
+                        process_proposal_event(event.clone(), &mut self.onchain_proposals);
+                    }
+                    
+                    // Update proposals status based on current block
+                    if let Ok(current_block) = indexer.get_block_number().await {
+                        for proposal in self.onchain_proposals.values_mut() {
+                            if proposal.status == ProposalStatus::Pending && current_block >= proposal.start_block {
+                                proposal.status = ProposalStatus::Active;
+                            } else if proposal.status == ProposalStatus::Active && current_block > proposal.end_block {
+                                // Check vote counts to determine if succeeded or defeated
+                                let for_votes: u128 = proposal.votes_for.parse().unwrap_or(0);
+                                let against_votes: u128 = proposal.votes_against.parse().unwrap_or(0);
+                                
+                                if for_votes > against_votes {
+                                    proposal.status = ProposalStatus::Succeeded;
+                                } else {
+                                    proposal.status = ProposalStatus::Defeated;
+                                }
+                            }
+                        }
+                        
+                        self.last_indexed_block = current_block;
+                    }
+                    
+                    // Save to storage
+                    if let Some(storage) = &self.storage {
+                        let _ = storage.save_proposals(&self.onchain_proposals);
+                        let _ = storage.save_metadata(self.last_indexed_block);
+                        
+                        // Save events log
+                        if !events.is_empty() {
+                            let _ = storage.save_event_log(self.last_indexed_block, &events);
+                        }
+                    }
+                    
+                    // Broadcast state update to committee
+                    for event in events {
+                        let gov_event = match event {
+                            ProposalEvent::Created { proposal_id, .. } => {
+                                if let Some(proposal) = self.onchain_proposals.get(&proposal_id) {
+                                    Some(GovernanceEvent::ProposalCreated(ProposalData {
+                                        id: proposal.id.clone(),
+                                        title: proposal.title.clone(),
+                                        description: proposal.description.clone(),
+                                        author: proposal.proposer.clone(),
+                                        status: proposal.status.clone(),
+                                        voting_start: HLCTimestamp::now(),
+                                        voting_end: HLCTimestamp::now(),
+                                        completion_time: None,
+                                    }))
+                                } else {
+                                    None
+                                }
+                            },
+                            ProposalEvent::VoteCast { proposal_id, voter, support, weight, .. } => {
+                                let choice = match support {
+                                    0 => VoteChoice::No,
+                                    1 => VoteChoice::Yes,
+                                    _ => VoteChoice::Abstain,
+                                };
+                                Some(GovernanceEvent::VoteCast(VoteRecord {
+                                    voter,
+                                    choice,
+                                    voting_power: weight.parse().unwrap_or(0),
+                                    timestamp: HLCTimestamp::now(),
+                                }))
+                            },
+                            _ => None,
+                        };
+                        
+                        if let Some(event) = gov_event {
+                            let _ = self.broadcast_event(event).await;
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("Failed to index proposals: {}", e);
+                }
+            }
+        }
+        
+        self.is_indexing = false;
+        Ok(())
+    }
+    
+    async fn send_keepalive(&mut self) -> Result<(), String> {
+        let ping = P2PMessage::Ping {
+            timestamp: current_timestamp(),
+            state_hash: self.compute_state_hash(),
+            vector_clock: self.crdt_state.vector_clock.clone(),
+            available_capacity: (MAX_SUBSCRIPTIONS - self.subscriptions.len()) as u32,
+        };
+        
+        // Send to all committee peers
+        for peer in self.committee_members.iter() {
+            if peer != &our().node {
+                let _ = self.send_p2p_message(peer, ping.clone()).await;
+            }
+        }
+        
+        // Clean up stale peers
+        let now = current_timestamp();
+        self.peers.retain(|_, info| {
+            now - info.last_seen < 300000 // 5 minutes
+        });
+        
+        Ok(())
+    }
+    
+    async fn broadcast_event(&mut self, event: GovernanceEvent) -> Result<(), String> {
+        let update = StateUpdate {
+            event: event.clone(),
+            signature: vec![],
+        };
+        
+        for member in self.committee_members.iter() {
+            if member != &our().node {
+                let _ = self.send_state_update(member, update.clone()).await;
+            }
+        }
+        
+        // Apply to local CRDT
+        self.apply_event_to_crdt(event);
+        
+        // Save CRDT state
+        if let Some(storage) = &self.storage {
+            let _ = storage.save_crdt_state(&self.crdt_state);
+        }
+        
+        Ok(())
+    }
+    
+    fn apply_event_to_crdt(&mut self, event: GovernanceEvent) {
+        match event {
+            GovernanceEvent::ProposalCreated(data) => {
+                self.crdt_state.proposals.insert(data.id.clone());
+                self.crdt_state.proposal_data.insert(data.id.clone(), data);
+            },
+            GovernanceEvent::VoteCast(vote) => {
+                // For simplicity, just tracking votes in a basic way
+                // Real CRDT implementation would use GCounter
+                self.crdt_state.vote_records
+                    .entry(vote.voter.clone())
+                    .or_insert_with(HashSet::new)
+                    .insert(vote);
+            },
+            GovernanceEvent::DiscussionAdded(msg) => {
+                self.crdt_state.discussions
+                    .entry(msg.id.clone())
+                    .or_insert_with(DiscussionCRDT::new)
+                    .messages.push(msg);
+            },
+            GovernanceEvent::CommitteeMemberAdded(member) => {
+                self.crdt_state.committee.insert(member);
+            },
+            GovernanceEvent::CommitteeMemberRemoved(member) => {
+                self.crdt_state.committee.remove(&member);
+            },
+        }
+        
+        self.crdt_state.update_merkle_root();
+    }
+    
+    async fn send_p2p_message(&self, target_node: &str, message: P2PMessage) -> Result<String, String> {
+        let target = Address::new(target_node, ("governance", "governance", "sys"));
+        
+        let request = Request::to(target)
+            .body(serde_json::to_vec(&message).unwrap());
+            
+        match send::<String>(request).await {
+            Ok(response) => Ok(response),
+            Err(e) => Err(format!("P2P send failed: {:?}", e))
+        }
+    }
+    
+    async fn send_state_update(&self, target_node: &str, update: StateUpdate) -> Result<(), String> {
+        let target = Address::new(target_node, ("governance", "governance", "sys"));
+        
+        let request = Request::to(target)
+            .body(serde_json::to_vec(&json!({
+                "handle_state_update": serde_json::to_string(&update).unwrap()
+            })).unwrap());
+            
+        let _ = send::<String>(request).await;
+        Ok(())
     }
 }
