@@ -31,12 +31,12 @@ function App() {
         <h1 className="app-title">🏛️ DAO Governance Portal</h1>
         <div className="node-info">
           {nodeId ? (
-            <>Connected as <span className="node-id">{nodeId}</span></>
+            <>Connected as <span className="badge info">{nodeId}</span></>
           ) : (
-            <span className="not-connected">Connecting to Hyperware...</span>
+            <span className="text-muted">Connecting to Hyperware...</span>
           )}
         </div>
-        {isSyncing && <span className="sync-indicator">Syncing...</span>}
+        {isSyncing && <span className="badge warning">Syncing...</span>}
       </header>
 
       {error && (
@@ -57,19 +57,19 @@ function App() {
         <div className="content">
           <nav className="tabs">
             <button 
-              className={activeTab === 'proposals' ? 'active' : ''}
+              className={`tab ${activeTab === 'proposals' ? 'active' : ''}`}
               onClick={() => setActiveTab('proposals')}
             >
               Proposals
             </button>
             <button 
-              className={activeTab === 'create' ? 'active' : ''}
+              className={`tab ${activeTab === 'create' ? 'active' : ''}`}
               onClick={() => setActiveTab('create')}
             >
               Create Proposal
             </button>
             <button 
-              className={activeTab === 'committee' ? 'active' : ''}
+              className={`tab ${activeTab === 'committee' ? 'active' : ''}`}
               onClick={() => setActiveTab('committee')}
             >
               Committee
@@ -83,8 +83,8 @@ function App() {
               <div className="committee-tab">
                 <h2>Committee Management</h2>
                 <CommitteeStatus />
-                <div className="committee-actions">
-                  <button onClick={syncWithCommittee} disabled={isSyncing}>
+                <div className="committee-actions mt-3">
+                  <button className="primary" onClick={syncWithCommittee} disabled={isSyncing}>
                     {isSyncing ? 'Syncing...' : 'Force Sync'}
                   </button>
                 </div>

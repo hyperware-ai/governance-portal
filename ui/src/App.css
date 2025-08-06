@@ -1,50 +1,29 @@
 .app {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #ffffff;
+  background: var(--background);
+  color: var(--text-primary);
 }
 
 .app-header {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface);
   padding: 1.5rem;
   text-align: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-color);
   position: relative;
+  box-shadow: var(--shadow-sm);
 }
 
 .app-title {
   font-size: 2.5rem;
   margin: 0;
   font-weight: 700;
+  color: var(--text-primary);
 }
 
 .node-info {
   margin-top: 0.5rem;
   font-size: 0.9rem;
-  opacity: 0.9;
-}
-
-.node-id {
-  font-family: monospace;
-  background: rgba(255, 255, 255, 0.1);
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-}
-
-.sync-indicator {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  padding: 0.3rem 0.8rem;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 20px;
-  font-size: 0.8rem;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+  color: var(--text-secondary);
 }
 
 .main-container {
@@ -61,74 +40,51 @@
 
 .content {
   flex: 1;
-  background: white;
+  background: var(--card-bg);
   border-radius: 12px;
   overflow: hidden;
-  color: #333;
-}
-
-.tabs {
-  display: flex;
-  background: #f5f5f5;
-  border-bottom: 2px solid #e0e0e0;
-}
-
-.tabs button {
-  flex: 1;
-  padding: 1rem;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.3s;
-}
-
-.tabs button:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.tabs button.active {
-  background: white;
-  border-bottom: 2px solid #667eea;
-  margin-bottom: -2px;
-  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--card-border);
 }
 
 .tab-content {
   padding: 2rem;
+  animation: fadeIn 0.3s ease;
 }
 
+/* Proposal List Styles */
 .proposal-list .section {
   margin-bottom: 2rem;
 }
 
 .proposal-list h2 {
-  color: #667eea;
+  color: var(--primary-color);
   margin-bottom: 1rem;
 }
 
 .proposal-card, .draft-card {
-  background: #f9f9f9;
-  border: 1px solid #e0e0e0;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 1.5rem;
   margin-bottom: 1rem;
-  transition: transform 0.2s;
+  transition: all 0.2s ease;
 }
 
 .proposal-card:hover, .draft-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-color);
 }
 
 .proposal-card h3, .draft-card h3 {
   margin: 0 0 0.5rem 0;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .proposer, .author {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 0.5rem;
 }
 
@@ -142,23 +98,27 @@
 }
 
 .status-badge.active {
-  background: #4caf50;
-  color: white;
+  background: var(--success-bg);
+  color: var(--success-color);
+  border: 1px solid var(--success-color);
 }
 
 .status-badge.pending {
-  background: #ff9800;
-  color: white;
+  background: var(--warning-bg);
+  color: var(--warning-color);
+  border: 1px solid var(--warning-color);
 }
 
 .status-badge.executed {
-  background: #2196f3;
-  color: white;
+  background: var(--info-bg);
+  color: var(--info-color);
+  border: 1px solid var(--info-color);
 }
 
 .status-badge.defeated {
-  background: #f44336;
-  color: white;
+  background: var(--error-bg);
+  color: var(--error-color);
+  border: 1px solid var(--error-color);
 }
 
 .vote-counts {
@@ -166,87 +126,114 @@
   gap: 1rem;
   margin: 1rem 0;
   font-size: 0.9rem;
+  color: var(--text-secondary);
 }
 
 .vote-buttons {
   display: flex;
   gap: 0.5rem;
+  margin-top: 1rem;
 }
 
 .vote-buttons button {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
-  transition: all 0.3s;
+  transition: all 0.2s ease;
 }
 
 .vote-buttons button:first-child {
-  background: #4caf50;
+  background: var(--success-color);
   color: white;
+}
+
+.vote-buttons button:first-child:hover {
+  opacity: 0.9;
 }
 
 .vote-buttons button:nth-child(2) {
-  background: #f44336;
+  background: var(--error-color);
   color: white;
+}
+
+.vote-buttons button:nth-child(2):hover {
+  opacity: 0.9;
 }
 
 .vote-buttons button:last-child {
-  background: #9e9e9e;
+  background: var(--text-muted);
   color: white;
 }
 
+.vote-buttons button:last-child:hover {
+  opacity: 0.9;
+}
+
+/* Committee and DAO Info */
 .committee-status, .dao-info {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--card-bg);
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
-  color: #333;
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-sm);
 }
 
 .committee-status h3, .dao-info h3 {
   margin-top: 0;
-  color: #667eea;
+  color: var(--primary-color);
+  font-size: 1.25rem;
 }
 
 .status-info .status-item, .info-grid .info-item {
   display: flex;
   justify-content: space-between;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #e0e0e0;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.status-info .status-item:last-child, .info-grid .info-item:last-child {
+  border-bottom: none;
 }
 
 .status-item .label, .info-item .label {
   font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.status-item .value, .info-item .value {
+  color: var(--text-primary);
 }
 
 .status-item .value.member {
-  color: #4caf50;
+  color: var(--success-color);
   font-weight: 600;
 }
 
 .status-item .value.non-member {
-  color: #ff9800;
+  color: var(--warning-color);
 }
 
 .join-button {
   margin-top: 1rem;
   width: 100%;
   padding: 0.8rem;
-  background: #667eea;
+  background: var(--primary-color);
   color: white;
   border: none;
   border-radius: 6px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.3s;
+  transition: background 0.2s ease;
 }
 
 .join-button:hover {
-  background: #5a67d8;
+  background: var(--primary-hover);
 }
 
+/* Create Proposal Form */
 .create-proposal {
   max-width: 800px;
 }
@@ -259,21 +246,32 @@
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 600;
-  color: #333;
+  color: var(--text-secondary);
 }
 
 .form-group input,
 .form-group textarea {
   width: 100%;
   padding: 0.8rem;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   font-size: 1rem;
+  background: var(--surface);
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(100, 108, 255, 0.1);
 }
 
 .form-group textarea {
   resize: vertical;
   font-family: inherit;
+  min-height: 150px;
 }
 
 .form-actions {
@@ -287,46 +285,55 @@
   border-radius: 6px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.2s ease;
 }
 
 .form-actions button[type="submit"] {
-  background: #667eea;
+  background: var(--primary-color);
   color: white;
 }
 
 .form-actions button[type="submit"]:hover {
-  background: #5a67d8;
+  background: var(--primary-hover);
 }
 
 .form-actions button[type="button"] {
-  background: #e0e0e0;
-  color: #333;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
+.form-actions button[type="button"]:hover {
+  background: var(--surface-hover);
+}
+
+/* Error and Loading States */
 .error-message {
-  background: #ffebee;
-  color: #c62828;
+  background: var(--error-bg);
+  color: var(--error-color);
   padding: 1rem;
   border-radius: 6px;
-  margin-bottom: 1rem;
+  margin: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border: 1px solid var(--error-color);
 }
 
 .loading {
   text-align: center;
   padding: 2rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 
+/* Members List */
 .members-list {
   margin-top: 1rem;
 }
 
 .members-list h4 {
   margin-bottom: 0.5rem;
+  color: var(--text-secondary);
 }
 
 .members-list ul {
@@ -335,17 +342,46 @@
 }
 
 .members-list li {
-  padding: 0.3rem 0;
+  padding: 0.5rem;
   font-family: monospace;
   font-size: 0.9rem;
+  background: var(--surface);
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
+/* Committee Tab */
+.committee-tab h2 {
+  color: var(--primary-color);
+  margin-bottom: 1.5rem;
+}
+
+.committee-actions {
+  margin-top: 2rem;
+}
+
+/* Responsive Design */
 @media (max-width: 768px) {
   .main-container {
     flex-direction: column;
+    padding: 0 1rem;
   }
   
   .sidebar {
     flex: 1;
+  }
+  
+  .app-title {
+    font-size: 2rem;
+  }
+  
+  .tabs {
+    overflow-x: auto;
+  }
+  
+  .tab {
+    white-space: nowrap;
   }
 }
