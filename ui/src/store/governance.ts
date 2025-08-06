@@ -9,6 +9,19 @@ import {
   VoteChoice 
 } from '../types/governance';
 
+// Helper to handle API responses that might be wrapped in Result or direct JSON
+function parseApiResponse<T>(response: any): T {
+  // If it's already parsed JSON, return it
+  if (typeof response === 'object' && response !== null) {
+    return response as T;
+  }
+  // If it's a string, parse it
+  if (typeof response === 'string') {
+    return JSON.parse(response) as T;
+  }
+  throw new Error('Invalid API response format');
+}
+
 interface GovernanceStore {
   proposals: OnchainProposal[];
   drafts: ProposalDraft[];
@@ -44,8 +57,8 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
   fetchProposals: async () => {
     set({ isLoading: true, error: null });
     try {
-      const resultStr = await api.getProposals();
-      const result = JSON.parse(resultStr);
+      const response = await api.getProposals();
+      const result = parseApiResponse<{ onchain: any[], drafts: any[] }>(response);
       set({ 
         proposals: result.onchain || [],
         drafts: result.drafts || [],
@@ -63,8 +76,8 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const payload = JSON.stringify({ title, description });
-      const resultStr = await api.createDraft(payload);
-      const result = JSON.parse(resultStr);
+      const response = await api.createDraft(payload);
+      const result = parseApiResponse<{ success: boolean, draft?: any, draft_id?: string }>(response);
       if (result.success) {
         set(state => ({
           drafts: [...state.drafts, result.draft],
@@ -92,8 +105,8 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
         content,
         parent_id: parentId || null
       });
-      const resultStr = await api.addDiscussion(payload);
-      const result = JSON.parse(resultStr);
+      const response = await api.addDiscussion(payload);
+      const result = parseApiResponse<{ success: boolean, discussion?: any }>(response);
       if (result.success) {
         set(state => {
           const discussions = new Map(state.discussions);
@@ -122,8 +135,8 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
   fetchCommitteeStatus: async () => {
     set({ isLoading: true, error: null });
     try {
-      const statusStr = await api.getCommitteeStatus();
-      const status = JSON.parse(statusStr);
+      const response = await api.getCommitteeStatus();
+      const status = parseApiResponse<CommitteeStatus>(response);
       set({ 
         committeeStatus: status,
         isLoading: false 
@@ -139,8 +152,8 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
   fetchVotingPower: async () => {
     set({ isLoading: true, error: null });
     try {
-      const powerStr = await api.getVotingPowerInfo();
-      const power = JSON.parse(powerStr);
+      const response = await api.getVotingPowerInfo();
+      const power = parseApiResponse<VotingPowerInfo>(response);
       set({ 
         votingPower: power,
         isLoading: false 
@@ -157,12 +170,20 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const payload = JSON.stringify(targetNodes);
-      await api.requestJoinCommittee(payload);
-      set({ 
-        isLoading: false,
-        error: null
-      });
-      await get().fetchCommitteeStatus();
+      const response = await api.requestJoinCommittee(payload);
+      // requestJoinCommittee returns a Result, check if it's successful
+      if (typeof response === 'string' && response.includes('Successfully')) {
+        set({ 
+          isLoading: false,
+          error: null
+        });
+        await get().fetchCommitteeStatus();
+      } else {
+        set({ 
+          error: 'Failed to join committee',
+          isLoading: false 
+        });
+      }
     } catch (error) {
       set({ 
         error: error instanceof Error ? error.message : 'Failed to join committee',

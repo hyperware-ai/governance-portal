@@ -498,16 +498,16 @@ impl GovernanceState {
     }
 
     #[http]
-    async fn ready(&self) -> String {
-        json!({ "ready": !self.is_indexing }).to_string()
+    async fn ready(&self) -> Result<String, String> {
+        Ok(json!({ "ready": !self.is_indexing }).to_string())
     }
 
     #[http]
-    async fn get_proposals(&self) -> String {
-        json!({
+    async fn get_proposals(&self) -> Result<String, String> {
+        Ok(json!({
             "onchain": self.onchain_proposals.values().collect::<Vec<_>>(),
             "drafts": self.proposal_drafts.values().collect::<Vec<_>>()
-        }).to_string()
+        }).to_string())
     }
 
     #[http]
@@ -564,21 +564,21 @@ impl GovernanceState {
     }
 
     #[http]
-    async fn get_committee_status(&self) -> String {
-        json!({
+    async fn get_committee_status(&self) -> Result<String, String> {
+        Ok(json!({
             "members": self.committee_members,
             "is_member": self.is_committee_member,
             "online_count": self.count_online_members()
-        }).to_string()
+        }).to_string())
     }
 
     #[http]
-    async fn get_voting_power_info(&self) -> String {
-        json!({
+    async fn get_voting_power_info(&self) -> Result<String, String> {
+        Ok(json!({
             "voting_power": "0",
             "delegated_power": "0",
             "total_supply": "0"
-        }).to_string()
+        }).to_string())
     }
 
     #[http]
