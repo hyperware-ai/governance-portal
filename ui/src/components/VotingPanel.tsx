@@ -23,12 +23,12 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({
   if (!proposal) return null;
   
   const handleVote = async () => {
-    if (!selectedChoice || !isConnected) return;
+    if (!selectedChoice || !isConnected || !walletAddress) return;
     
     setIsVoting(true);
     try {
-      await castVote(proposalId, selectedChoice);
-      // In a real implementation, this would submit the vote on-chain
+      await castVote(proposalId, selectedChoice, walletAddress);
+      // Vote submitted to backend, which will submit to chain
       alert(`Vote cast: ${selectedChoice} for proposal ${proposalId}`);
       setSelectedChoice(null);
       setVotingReason('');

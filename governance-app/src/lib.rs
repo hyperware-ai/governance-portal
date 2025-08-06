@@ -16,6 +16,7 @@ use sha3::{Digest, Sha3_256};
 
 mod chain_indexer;
 mod storage;
+mod contracts;
 
 use chain_indexer::{ChainIndexer, ProposalEvent, process_proposal_event};
 use storage::FileStorage;
@@ -649,11 +650,178 @@ impl GovernanceState {
     }
 
     #[http]
-    async fn get_voting_power_info(&self) -> Result<String, String> {
+    async fn get_voting_power_info(&mut self, request: String) -> Result<String, String> {
+        // Parse the request to get the wallet address
+        let req: serde_json::Value = serde_json::from_str(&request)
+            .unwrap_or_else(|_| json!({}));
+        
+        let address = req.get("address")
+            .and_then(|a| a.as_str())
+            .unwrap_or("0x0000000000000000000000000000000000000000");
+        
+        // Get voting power from chain
+        let voting_power = if let Some(indexer) = &self.chain_indexer {
+            match indexer.get_voting_power(address, 0).await {
+                Ok(power) => power,
+                Err(_) => "0".to_string(),
+            }
+        } else {
+            "0".to_string()
+        };
+        
+        // Get total supply (simplified - would query token contract)
+        let total_supply = "1000000000000000000000000".to_string(); // 1M tokens
+        
         Ok(json!({
-            "voting_power": "0",
+            "address": address,
+            "voting_power": voting_power,
             "delegated_power": "0",
-            "total_supply": "0"
+            "total_supply": total_supply,
+            "quorum": "100000000000000000000000" // 100k tokens
+        }).to_string())
+    }
+    
+    #[http]
+    async fn submit_proposal(&mut self, request: String) -> Result<String, String> {
+        let req: serde_json::Value = serde_json::from_str(&request)
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        
+        let title = req.get("title")
+            .and_then(|t| t.as_str())
+            .ok_or("Missing title")?;
+            
+        let description = req.get("description")
+            .and_then(|d| d.as_str())
+            .ok_or("Missing description")?;
+            
+        let targets = req.get("targets")
+            .and_then(|t| t.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_else(Vec::new);
+            
+        let values = req.get("values")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_else(Vec::new);
+            
+        let calldatas = req.get("calldatas")
+            .and_then(|c| c.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_else(Vec::new);
+        
+        // Generate proposal ID (would be computed from hash)
+        let proposal_id = format!("0x{}", hex::encode(Sha3_256::digest(description.as_bytes())));
+        
+        // Create the onchain proposal
+        let proposal = OnchainProposal {
+            id: proposal_id.clone(),
+            proposer: req.get("proposer")
+                .and_then(|p| p.as_str())
+                .unwrap_or("0x0000000000000000000000000000000000000000")
+                .to_string(),
+            title: title.to_string(),
+            description: description.to_string(),
+            targets,
+            values,
+            calldatas,
+            start_block: 0, // Would be set by chain
+            end_block: 0, // Would be set by chain
+            votes_for: "0".to_string(),
+            votes_against: "0".to_string(),
+            votes_abstain: "0".to_string(),
+            status: ProposalStatus::Pending,
+            tx_hash: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            block_number: 0,
+        };
+        
+        // Add to local state
+        self.onchain_proposals.insert(proposal_id.clone(), proposal);
+        
+        // Save to storage
+        if let Some(storage) = &self.storage {
+            let _ = storage.save_proposals(&self.onchain_proposals);
+        }
+        
+        // In production, this would submit the transaction to chain
+        // For now, return success with the proposal ID
+        Ok(json!({
+            "success": true,
+            "proposal_id": proposal_id,
+            "message": "Proposal created locally. Chain submission pending."
+        }).to_string())
+    }
+    
+    #[http]
+    async fn cast_vote(&mut self, request: String) -> Result<String, String> {
+        let req: serde_json::Value = serde_json::from_str(&request)
+            .map_err(|e| format!("Invalid request: {}", e))?;
+            
+        let proposal_id = req.get("proposal_id")
+            .and_then(|p| p.as_str())
+            .ok_or("Missing proposal_id")?;
+            
+        let support = req.get("support")
+            .and_then(|s| s.as_u64())
+            .ok_or("Missing support value")? as u8;
+            
+        let voter = req.get("voter")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing voter address")?;
+            
+        let reason = req.get("reason")
+            .and_then(|r| r.as_str())
+            .unwrap_or("");
+        
+        // Get voting power for the voter
+        let voting_power = if let Some(indexer) = &self.chain_indexer {
+            match indexer.get_voting_power(voter, 0).await {
+                Ok(power) => power,
+                Err(_) => "0".to_string(),
+            }
+        } else {
+            "1000000000000000000".to_string() // 1 token as default
+        };
+        
+        // Create vote event
+        let vote_event = ProposalEvent::VoteCast {
+            proposal_id: proposal_id.to_string(),
+            voter: voter.to_string(),
+            support,
+            weight: voting_power.clone(),
+            reason: reason.to_string(),
+            block_number: 0,
+            tx_hash: "0x0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        };
+        
+        // Process the vote
+        process_proposal_event(vote_event, &mut self.onchain_proposals);
+        
+        // Save to storage
+        if let Some(storage) = &self.storage {
+            let _ = storage.save_proposals(&self.onchain_proposals);
+        }
+        
+        // Broadcast to committee
+        let gov_event = GovernanceEvent::VoteCast(VoteRecord {
+            voter: voter.to_string(),
+            choice: match support {
+                0 => VoteChoice::No,
+                1 => VoteChoice::Yes,
+                _ => VoteChoice::Abstain,
+            },
+            voting_power: voting_power.parse().unwrap_or(0),
+            timestamp: HLCTimestamp::now(),
+        });
+        
+        let _ = self.broadcast_event(gov_event).await;
+        
+        Ok(json!({
+            "success": true,
+            "proposal_id": proposal_id,
+            "voter": voter,
+            "support": support,
+            "voting_power": voting_power,
+            "message": "Vote recorded locally. Chain submission pending."
         }).to_string())
     }
 

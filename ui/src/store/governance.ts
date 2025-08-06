@@ -36,10 +36,10 @@ interface GovernanceStore {
   createDraft: (title: string, description: string) => Promise<void>;
   addDiscussion: (proposalId: string, content: string, parentId?: string) => Promise<void>;
   fetchCommitteeStatus: () => Promise<void>;
-  fetchVotingPower: () => Promise<void>;
+  fetchVotingPower: (address?: string) => Promise<void>;
   joinCommittee: (targetNodes: string[]) => Promise<void>;
   syncWithCommittee: () => Promise<void>;
-  castVote: (proposalId: string, choice: VoteChoice) => Promise<void>;
+  castVote: (proposalId: string, choice: VoteChoice, voter?: string) => Promise<void>;
   setError: (error: string | null) => void;
   clearError: () => void;
 }
@@ -149,10 +149,12 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     }
   },
 
-  fetchVotingPower: async () => {
+  fetchVotingPower: async (address?: string) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await api.getVotingPowerInfo();
+      // Pass the wallet address if provided, otherwise empty object
+      const request = address ? JSON.stringify({ address }) : '{}';
+      const response = await api.getVotingPowerInfo(request);
       const power = parseApiResponse<VotingPowerInfo>(response);
       set({ 
         votingPower: power,
@@ -206,9 +208,35 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     }
   },
 
-  castVote: async (proposalId: string, choice: VoteChoice) => {
-    console.log('Voting on proposal', proposalId, 'with choice', choice);
-    set({ error: 'Voting not yet implemented' });
+  castVote: async (proposalId: string, choice: VoteChoice, voter?: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const support = choice === VoteChoice.Yes ? 1 : choice === VoteChoice.No ? 0 : 2;
+      const payload = JSON.stringify({
+        proposal_id: proposalId,
+        support,
+        voter: voter || '0x0000000000000000000000000000000000000000',
+        reason: ''
+      });
+      const response = await api.castVote(payload);
+      const result = parseApiResponse<{ success: boolean, message?: string }>(response);
+      
+      if (result.success) {
+        // Refresh proposals to get updated vote counts
+        await get().fetchProposals();
+        set({ isLoading: false });
+      } else {
+        set({ 
+          error: result.message || 'Failed to cast vote',
+          isLoading: false 
+        });
+      }
+    } catch (error) {
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to cast vote',
+        isLoading: false 
+      });
+    }
   },
 
   setError: (error: string | null) => set({ error }),

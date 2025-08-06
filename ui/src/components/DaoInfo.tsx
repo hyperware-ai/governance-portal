@@ -11,9 +11,9 @@ export const DaoInfo: React.FC<DaoInfoProps> = ({ walletAddress, isConnected }) 
 
   useEffect(() => {
     if (isConnected && walletAddress) {
-      fetchVotingPower();
+      fetchVotingPower(walletAddress);
     }
-  }, [isConnected, walletAddress]);
+  }, [isConnected, walletAddress, fetchVotingPower]);
 
   return (
     <div className="dao-info">
@@ -49,13 +49,13 @@ export const DaoInfo: React.FC<DaoInfoProps> = ({ walletAddress, isConnected }) 
           <div className="info-item">
             <span className="label">Governor:</span>
             <span className="value" style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
-              0x0000...0000
+              0x1234...7890
             </span>
           </div>
           <div className="info-item">
             <span className="label">Token:</span>
             <span className="value" style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
-              0x0000...0000
+              0x2345...8901
             </span>
           </div>
         </div>
