@@ -1,0 +1,36 @@
+[package]
+name = "skeleton-app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "hyperware:process"
+
+[dependencies]
+# Core dependencies for Hyperware apps
+anyhow = "1.0"
+process_macros = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.42.1"
+
+# IMPORTANT: hyperprocess_macro provides async support and WIT generation
+[dependencies.hyperprocess_macro]
+git = "https://github.com/hyperware-ai/hyperprocess-macro"
+rev = "f1cd5bb"
+
+# Common utilities for Hyperware apps
+[dependencies.hyperware_app_common]
+git = "https://github.com/hyperware-ai/hyperprocess-macro"
+rev = "f1cd5bb"
+
+# Optional dependencies you might need:
+# uuid = { version = "1.4.1", features = ["v4", "serde"] }
+# chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+# Use simulation-mode for testing without a full Hyperware node
+simulation-mode = []
