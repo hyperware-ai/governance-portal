@@ -12,7 +12,7 @@ package = "hyperware:process"
 [dependencies]
 # Core dependencies for Hyperware apps
 anyhow = "1.0"
-process_macros = "0.1"
+process_macros = "0.1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 wit-bindgen = "0.42.1"
@@ -27,9 +27,12 @@ base64 = "0.22"
 rand = "0.8"
 
 # CRDT dependencies for distributed state synchronization
-# crdts = "7.0"  # Temporarily disabled - using simplified CRDT
+crdts = "7.0"  # Production-ready CRDT library
+datacake-crdt = "0.4"  # For hybrid logical clocks
 im = "15.1"  # Persistent data structures for CRDT
 hex = "0.4"
+alloy-primitives = "0.8"  # For keccak256 hashing
+alloy-sol-types = "0.8"  # For event decoding
 
 # IMPORTANT: hyperprocess_macro provides async support and WIT generation
 [dependencies.hyperprocess_macro]

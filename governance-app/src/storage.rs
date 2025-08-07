@@ -26,10 +26,10 @@ impl FileStorage {
         let data = serde_json::to_vec(proposals)
             .map_err(|e| format!("Failed to serialize proposals: {}", e))?;
             
-        let mut file = vfs::open_file(&path, true, None)
+        let file = vfs::open_file(&path, true, None)
             .map_err(|e| format!("Failed to open proposals file: {:?}", e))?;
             
-        file.write_all(&data)
+        file.write(&data)
             .map_err(|e| format!("Failed to write proposals: {:?}", e))?;
             
         Ok(())
@@ -56,10 +56,10 @@ impl FileStorage {
         let data = serde_json::to_vec(drafts)
             .map_err(|e| format!("Failed to serialize drafts: {}", e))?;
             
-        let mut file = vfs::open_file(&path, true, None)
+        let file = vfs::open_file(&path, true, None)
             .map_err(|e| format!("Failed to open drafts file: {:?}", e))?;
             
-        file.write_all(&data)
+        file.write(&data)
             .map_err(|e| format!("Failed to write drafts: {:?}", e))?;
             
         Ok(())
@@ -86,10 +86,10 @@ impl FileStorage {
         let data = serde_json::to_vec(discussions)
             .map_err(|e| format!("Failed to serialize discussions: {}", e))?;
             
-        let mut file = vfs::open_file(&path, true, None)
+        let file = vfs::open_file(&path, true, None)
             .map_err(|e| format!("Failed to open discussions file: {:?}", e))?;
             
-        file.write_all(&data)
+        file.write(&data)
             .map_err(|e| format!("Failed to write discussions: {:?}", e))?;
             
         Ok(())
@@ -116,10 +116,10 @@ impl FileStorage {
         let data = bincode::serialize(crdt)
             .map_err(|e| format!("Failed to serialize CRDT state: {}", e))?;
             
-        let mut file = vfs::open_file(&path, true, None)
+        let file = vfs::open_file(&path, true, None)
             .map_err(|e| format!("Failed to open CRDT file: {:?}", e))?;
             
-        file.write_all(&data)
+        file.write(&data)
             .map_err(|e| format!("Failed to write CRDT state: {:?}", e))?;
             
         Ok(())
@@ -147,10 +147,10 @@ impl FileStorage {
         let data = serde_json::to_vec(&metadata)
             .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
             
-        let mut file = vfs::open_file(&path, true, None)
+        let file = vfs::open_file(&path, true, None)
             .map_err(|e| format!("Failed to open metadata file: {:?}", e))?;
             
-        file.write_all(&data)
+        file.write(&data)
             .map_err(|e| format!("Failed to write metadata: {:?}", e))?;
             
         Ok(())
@@ -179,10 +179,10 @@ impl FileStorage {
         let data = serde_json::to_vec(events)
             .map_err(|e| format!("Failed to serialize events: {}", e))?;
         
-        let mut file = vfs::open_file(&path, true, None)
+        let file = vfs::open_file(&path, true, None)
             .map_err(|e| format!("Failed to open events file: {:?}", e))?;
             
-        file.write_all(&data)
+        file.write(&data)
             .map_err(|e| format!("Failed to write events: {:?}", e))?;
             
         Ok(())

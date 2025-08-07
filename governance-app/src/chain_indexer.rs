@@ -1,8 +1,54 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use hyperware_app_common::hyperware_process_lib::eth;
+use alloy_sol_types::{SolEvent, sol};
+// Event decoding is handled by alloy_sol_types
 
 use crate::{OnchainProposal, ProposalStatus};
+
+// Define the Governor contract events using alloy_sol_types
+sol! {
+    #[derive(Debug)]
+    event ProposalCreated(
+        uint256 proposalId,
+        address proposer,
+        address[] targets,
+        uint256[] values,
+        string[] signatures,
+        bytes[] calldatas,
+        uint256 voteStart,
+        uint256 voteEnd,
+        string description
+    );
+    
+    #[derive(Debug)]
+    event VoteCast(
+        address indexed voter,
+        uint256 proposalId,
+        uint8 support,
+        uint256 weight,
+        string reason
+    );
+    
+    #[derive(Debug)]
+    event VoteCastWithParams(
+        address indexed voter,
+        uint256 proposalId,
+        uint8 support,
+        uint256 weight,
+        string reason,
+        bytes params
+    );
+    
+    #[derive(Debug)]
+    event ProposalCanceled(uint256 proposalId);
+    
+    #[derive(Debug)]
+    event ProposalQueued(uint256 proposalId, uint256 eta);
+    
+    #[derive(Debug)]
+    event ProposalExecuted(uint256 proposalId);
+}
 
 // Chain indexer that interacts with the actual blockchain using eth provider
 #[derive(Clone)]
@@ -41,13 +87,12 @@ impl ChainIndexer {
     ) -> Result<Vec<ProposalEvent>, String> {
         let to_block = to_block.unwrap_or(from_block + 1000); // Default to 1000 blocks at a time
         
-        // Create filter for ProposalCreated events
+        // Create filter for ProposalCreated events with proper topic
         let filter = eth::Filter::new()
             .address(self.governor_address)
             .from_block(eth::BlockNumberOrTag::Number(from_block))
-            .to_block(eth::BlockNumberOrTag::Number(to_block));
-            // Note: topic filtering would be added here if eth module supports it
-            // For now, we'll filter by address and block range
+            .to_block(eth::BlockNumberOrTag::Number(to_block))
+            .event_signature(ProposalCreated::SIGNATURE_HASH);
         
         // Get logs from chain
         let logs = self.provider.get_logs(&filter)
@@ -61,18 +106,38 @@ impl ChainIndexer {
             }
         }
         
-        // Also get VoteCast events
+        // Also get VoteCast events with proper topics
         let vote_filter = eth::Filter::new()
             .address(self.governor_address)
             .from_block(eth::BlockNumberOrTag::Number(from_block))
-            .to_block(eth::BlockNumberOrTag::Number(to_block));
-            // Note: topic filtering would be added here if eth module supports it
+            .to_block(eth::BlockNumberOrTag::Number(to_block))
+            .events(vec![VoteCast::SIGNATURE, VoteCastWithParams::SIGNATURE]);
         
         let vote_logs = self.provider.get_logs(&vote_filter)
             .map_err(|e| format!("Failed to get vote logs: {:?}", e))?;
         
         for log in vote_logs {
             if let Some(event) = self.parse_vote_cast_log(&log) {
+                events.push(event);
+            }
+        }
+        
+        // Get other governance events (Canceled, Queued, Executed)
+        let other_filter = eth::Filter::new()
+            .address(self.governor_address)
+            .from_block(eth::BlockNumberOrTag::Number(from_block))
+            .to_block(eth::BlockNumberOrTag::Number(to_block))
+            .events(vec![
+                ProposalCanceled::SIGNATURE,
+                ProposalQueued::SIGNATURE,
+                ProposalExecuted::SIGNATURE,
+            ]);
+        
+        let other_logs = self.provider.get_logs(&other_filter)
+            .map_err(|e| format!("Failed to get other logs: {:?}", e))?;
+        
+        for log in other_logs {
+            if let Some(event) = self.parse_other_governance_log(&log) {
                 events.push(event);
             }
         }
@@ -90,57 +155,114 @@ impl ChainIndexer {
         Ok(events)
     }
     
-    fn parse_proposal_created_log(&self, log: &eth::Log) -> Option<ProposalEvent> {
-        // Extract proposal ID from topics (usually first indexed param)
+    fn parse_other_governance_log(&self, log: &eth::Log) -> Option<ProposalEvent> {
         let topics = log.topics();
-        let proposal_id = if topics.len() > 1 {
-            format!("{:?}", topics[1])
-        } else {
+        if topics.is_empty() {
             return None;
-        };
+        }
         
-        // Parse data field for non-indexed params
-        // This is simplified - in production would use proper ABI decoding
         let block_number = log.block_number.unwrap_or(0);
         
+        // Check which event type this is by matching the topic signature
+        if topics[0] == ProposalCanceled::SIGNATURE_HASH {
+            if let Ok(decoded) = ProposalCanceled::decode_log_data(log.data(), false) {
+                return Some(ProposalEvent::Canceled {
+                    proposal_id: format!("0x{:064x}", decoded.proposalId),
+                    block_number,
+                });
+            }
+        } else if topics[0] == ProposalQueued::SIGNATURE_HASH {
+            if let Ok(decoded) = ProposalQueued::decode_log_data(log.data(), false) {
+                return Some(ProposalEvent::Queued {
+                    proposal_id: format!("0x{:064x}", decoded.proposalId),
+                    eta: decoded.eta.to::<u64>(),
+                    block_number,
+                });
+            }
+        } else if topics[0] == ProposalExecuted::SIGNATURE_HASH {
+            if let Ok(decoded) = ProposalExecuted::decode_log_data(log.data(), false) {
+                return Some(ProposalEvent::Executed {
+                    proposal_id: format!("0x{:064x}", decoded.proposalId),
+                    block_number,
+                });
+            }
+        }
+        
+        None
+    }
+    
+    fn parse_proposal_created_log(&self, log: &eth::Log) -> Option<ProposalEvent> {
+        // Properly decode the ProposalCreated event using alloy_sol_types
+        let decoded = match ProposalCreated::decode_log_data(log.data(), false) {
+            Ok(decoded) => decoded,
+            Err(e) => {
+                eprintln!("Failed to decode ProposalCreated event: {:?}", e);
+                return None;
+            }
+        };
+        
+        let block_number = log.block_number.unwrap_or(0);
+        
+        // Extract title from description (often first line or formatted)
+        let title = decoded.description
+            .lines()
+            .next()
+            .unwrap_or("Untitled Proposal")
+            .to_string();
+        
         Some(ProposalEvent::Created {
-            proposal_id,
-            proposer: if topics.len() > 2 {
-                format!("{:?}", eth::Address::from_word(topics[2]))
-            } else {
-                "0x0000000000000000000000000000000000000000".to_string()
-            },
-            title: "Proposal".to_string(), // Would extract from data
-            description: "Description".to_string(), // Would extract from data
-            targets: vec![],
-            values: vec![],
-            calldatas: vec![],
-            start_block: block_number,
-            end_block: block_number + 50400, // ~7 days at 12s blocks
+            proposal_id: format!("0x{:064x}", decoded.proposalId),
+            proposer: format!("0x{:x}", decoded.proposer),
+            title,
+            description: decoded.description.clone(),
+            targets: decoded.targets.iter()
+                .map(|addr| format!("0x{:x}", addr))
+                .collect(),
+            values: decoded.values.iter()
+                .map(|val| val.to_string())
+                .collect(),
+            calldatas: decoded.calldatas.iter()
+                .map(|data| format!("0x{}", hex::encode(data)))
+                .collect(),
+            start_block: decoded.voteStart.to::<u64>(),
+            end_block: decoded.voteEnd.to::<u64>(),
             block_number,
             tx_hash: format!("{:?}", log.transaction_hash.unwrap_or_default()),
         })
     }
     
     fn parse_vote_cast_log(&self, log: &eth::Log) -> Option<ProposalEvent> {
-        // Extract voter from first indexed param
-        let topics = log.topics();
-        let voter = if topics.len() > 1 {
-            format!("{:?}", eth::Address::from_word(topics[1]))
-        } else {
-            return None;
-        };
+        // Try to decode as VoteCast or VoteCastWithParams
+        let (proposal_id, voter, support, weight, reason) = 
+            if let Ok(decoded) = VoteCast::decode_log_data(log.data(), true) {
+                (
+                    decoded.proposalId,
+                    decoded.voter,
+                    decoded.support,
+                    decoded.weight,
+                    decoded.reason,
+                )
+            } else if let Ok(decoded) = VoteCastWithParams::decode_log_data(log.data(), true) {
+                (
+                    decoded.proposalId,
+                    decoded.voter,
+                    decoded.support,
+                    decoded.weight,
+                    decoded.reason,
+                )
+            } else {
+                eprintln!("Failed to decode VoteCast event");
+                return None;
+            };
         
         let block_number = log.block_number.unwrap_or(0);
         
-        // Parse data for proposal_id, support, weight
-        // This is simplified - would need proper ABI decoding
         Some(ProposalEvent::VoteCast {
-            proposal_id: "1".to_string(), // Would extract from data
-            voter,
-            support: 1, // Would extract from data
-            weight: "1000000000000000000".to_string(), // Would extract from data
-            reason: "".to_string(),
+            proposal_id: format!("0x{:064x}", proposal_id),
+            voter: format!("0x{:x}", voter),
+            support,
+            weight: weight.to_string(),
+            reason,
             block_number,
             tx_hash: format!("{:?}", log.transaction_hash.unwrap_or_default()),
         })
@@ -152,42 +274,157 @@ impl ChainIndexer {
     }
     
     pub async fn get_proposal_state(&self, proposal_id: &str) -> Result<ProposalStatus, String> {
-        // Encode the function call data
+        // Encode state(uint256) call
         let mut data = vec![0x3e, 0x4f, 0x49, 0xe6]; // state(uint256) selector
         
-        // Add proposal ID as uint256 (32 bytes, padded)
+        // Parse proposal ID as U256
         let id_bytes = if proposal_id.starts_with("0x") {
             hex::decode(&proposal_id[2..]).unwrap_or_else(|_| vec![0; 32])
         } else {
-            hex::decode(proposal_id).unwrap_or_else(|_| vec![0; 32])
+            proposal_id.parse::<u64>()
+                .map(|n| {
+                    let mut bytes = vec![0u8; 24];
+                    bytes.extend_from_slice(&n.to_be_bytes());
+                    bytes
+                })
+                .unwrap_or_else(|_| vec![0; 32])
         };
         
-        // Pad to 32 bytes
-        let mut padded = vec![0u8; 32 - id_bytes.len().min(32)];
-        padded.extend_from_slice(&id_bytes[..id_bytes.len().min(32)]);
+        // Ensure 32 bytes
+        let mut padded = [0u8; 32];
+        let start = 32usize.saturating_sub(id_bytes.len());
+        padded[start..].copy_from_slice(&id_bytes[..id_bytes.len().min(32)]);
         data.extend_from_slice(&padded);
         
-        // Make the call using provider's call method
-        // The exact API depends on what's available in eth module
-        // For now, we'll return a default state
-        Ok(ProposalStatus::Active) // Simplified for production build
+        // Call the contract
+        let mut tx = eth::TransactionRequest::default();
+        tx.to = Some(self.governor_address.into());
+        tx.input = data.into();
+        let result = self.provider.call(tx, None)
+            .map_err(|e| format!("Failed to get proposal state: {:?}", e))?;
+        
+        // Decode uint8 result
+        if !result.is_empty() {
+            let state_num = result[result.len() - 1]; // Last byte is the state
+            Ok(match state_num {
+                0 => ProposalStatus::Pending,
+                1 => ProposalStatus::Active,
+                2 => ProposalStatus::Canceled,
+                3 => ProposalStatus::Defeated,
+                4 => ProposalStatus::Succeeded,
+                5 => ProposalStatus::Queued,
+                6 => ProposalStatus::Expired,
+                7 => ProposalStatus::Executed,
+                _ => ProposalStatus::Pending,
+            })
+        } else {
+            Ok(ProposalStatus::Pending)
+        }
     }
     
-    pub async fn get_voting_power(&self, _address: &str, _block: u64) -> Result<String, String> {
-        // Simplified for production build - would use actual provider call
-        // Return a default voting power
-        Ok("1000000000000000000".to_string()) // 1 token
+    pub async fn get_voting_power(&self, voter: &str, block_number: u64) -> Result<String, String> {
+        // Query token contract for voter's balance at specific block
+        let voter_address = voter.parse::<eth::Address>()
+            .map_err(|e| format!("Invalid voter address: {:?}", e))?;
+        
+        // Encode balanceOf(address) call
+        let mut data = vec![0x70, 0xa0, 0x82, 0x31]; // balanceOf selector
+        data.extend_from_slice(&[0u8; 12]); // Pad address to 32 bytes
+        data.extend_from_slice(voter_address.as_slice());
+        
+        // Make the call at specific block
+        let mut tx = eth::TransactionRequest::default();
+        tx.to = Some(self.token_address.into());
+        tx.input = data.into();
+        let result = self.provider.call(tx, Some(eth::BlockId::Number(eth::BlockNumberOrTag::Number(block_number))))
+            .map_err(|e| format!("Failed to get voting power: {:?}", e))?;
+        
+        // Decode uint256 result
+        if result.len() >= 32 {
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(&result[..32]);
+            let value = eth::U256::from_be_bytes(bytes);
+            Ok(value.to_string())
+        } else {
+            Ok("0".to_string())
+        }
     }
     
-    pub async fn get_proposal_votes(&self, _proposal_id: &str) -> Result<(String, String, String), String> {
-        // Simplified for production build - would use actual provider call
-        Ok(("0".to_string(), "0".to_string(), "0".to_string()))
+    pub async fn get_proposal_votes(&self, proposal_id: &str) -> Result<(String, String, String), String> {
+        // Encode proposalVotes(uint256) call
+        let mut data = vec![0x54, 0x4f, 0xbc, 0xac]; // proposalVotes selector
+        
+        // Parse and pad proposal ID
+        let id_bytes = if proposal_id.starts_with("0x") {
+            hex::decode(&proposal_id[2..]).unwrap_or_else(|_| vec![0; 32])
+        } else {
+            proposal_id.parse::<u64>()
+                .map(|n| {
+                    let mut bytes = vec![0u8; 24];
+                    bytes.extend_from_slice(&n.to_be_bytes());
+                    bytes
+                })
+                .unwrap_or_else(|_| vec![0; 32])
+        };
+        
+        let mut padded = [0u8; 32];
+        let start = 32usize.saturating_sub(id_bytes.len());
+        padded[start..].copy_from_slice(&id_bytes[..id_bytes.len().min(32)]);
+        data.extend_from_slice(&padded);
+        
+        // Call the contract
+        let mut tx = eth::TransactionRequest::default();
+        tx.to = Some(self.governor_address.into());
+        tx.input = data.into();
+        let result = self.provider.call(tx, None)
+            .map_err(|e| format!("Failed to get proposal votes: {:?}", e))?;
+        
+        // Decode three uint256 values (againstVotes, forVotes, abstainVotes)
+        if result.len() >= 96 {
+            let mut against_bytes = [0u8; 32];
+            let mut for_bytes = [0u8; 32];
+            let mut abstain_bytes = [0u8; 32];
+            
+            against_bytes.copy_from_slice(&result[0..32]);
+            for_bytes.copy_from_slice(&result[32..64]);
+            abstain_bytes.copy_from_slice(&result[64..96]);
+            
+            let against = eth::U256::from_be_bytes(against_bytes).to_string();
+            let for_votes = eth::U256::from_be_bytes(for_bytes).to_string();
+            let abstain = eth::U256::from_be_bytes(abstain_bytes).to_string();
+            
+            Ok((against, for_votes, abstain))
+        } else {
+            Ok(("0".to_string(), "0".to_string(), "0".to_string()))
+        }
     }
     
-    pub async fn get_quorum(&self, _block: u64) -> Result<String, String> {
-        // Simplified for production build - would use actual provider call
-        // The exact eth module API for contract calls would need to be determined
-        Ok("1000000000000000000".to_string()) // Default quorum of 1 token
+    pub async fn get_quorum(&self, block: u64) -> Result<String, String> {
+        // Encode quorum(uint256) call with block number as parameter
+        let mut data = vec![0xf8, 0xd3, 0xd4, 0x76]; // quorum selector
+        
+        // Add block number as uint256 parameter
+        let mut block_bytes = [0u8; 32];
+        block_bytes[24..].copy_from_slice(&block.to_be_bytes());
+        data.extend_from_slice(&block_bytes);
+        
+        // Call the contract at the specific block
+        let mut tx = eth::TransactionRequest::default();
+        tx.to = Some(self.governor_address.into());
+        tx.input = data.into();
+        let result = self.provider.call(tx, Some(eth::BlockId::Number(eth::BlockNumberOrTag::Number(block))))
+            .map_err(|e| format!("Failed to get quorum: {:?}", e))?;
+        
+        // Decode uint256 result
+        if result.len() >= 32 {
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(&result[..32]);
+            let value = eth::U256::from_be_bytes(bytes);
+            Ok(value.to_string())
+        } else {
+            // Default to 4% of total supply if call fails
+            Ok("40000000000000000000000".to_string()) // 40,000 tokens (4% of 1M)
+        }
     }
 }
 
