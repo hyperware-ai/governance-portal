@@ -5,7 +5,7 @@
   "properties": {
     "package_name": "governance",
     "current_version": "1.0.0",
-    "publisher": "governance.os",
+    "publisher": "ware.hypr",
     "mirrors": [],
     "code_hashes": {
       "1.0.0": ""

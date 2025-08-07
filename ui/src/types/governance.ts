@@ -60,6 +60,9 @@ export interface CommitteeStatus {
   members: string[];
   is_member: boolean;
   online_count: number;
+  committee_count?: number;
+  subscriber_count?: number;
+  total_participants?: number;
 }
 
 export interface VotingPowerInfo {

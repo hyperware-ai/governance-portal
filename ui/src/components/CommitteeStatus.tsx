@@ -33,12 +33,20 @@ export const CommitteeStatus: React.FC = () => {
       {committeeStatus ? (
         <div className="status-info">
           <div className="status-item">
-            <span className="label">Total Members:</span>
-            <span className="value">{committeeStatus.members.length}</span>
+            <span className="label">Committee Members:</span>
+            <span className="value">{committeeStatus.committee_count || committeeStatus.members.length}</span>
+          </div>
+          <div className="status-item">
+            <span className="label">Subscribers:</span>
+            <span className="value">{committeeStatus.subscriber_count || 0}</span>
           </div>
           <div className="status-item">
             <span className="label">Online Members:</span>
             <span className="value">{committeeStatus.online_count}</span>
+          </div>
+          <div className="status-item">
+            <span className="label">Total Participants:</span>
+            <span className="value">{committeeStatus.total_participants || (committeeStatus.members.length + (committeeStatus.subscriber_count || 0))}</span>
           </div>
           <div className="status-item">
             <span className="label">Your Status:</span>
