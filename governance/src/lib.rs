@@ -77,6 +77,14 @@ pub struct GovernanceState {
     crdt_state: GovernanceCRDT,
     subscriptions: HashMap<String, Subscription>,
     peers: HashMap<String, PeerInfo>,
+    
+    // Track processed events to prevent infinite loops
+    processed_events: HashSet<String>,
+    
+    // Count tracking for UI display
+    committee_count: usize,
+    subscriber_count: usize,
+    total_participants: usize,
 
     // Complete committee state management
     #[serde(skip)]
@@ -106,6 +114,8 @@ impl Default for GovernanceState {
         let our_node = our().node.clone();
         let is_member = default_committee.contains(&our_node);
 
+        let committee_count = default_committee.len();
+        
         Self {
             last_indexed_block: 0,
             chain_id: 8453, // Base mainnet
@@ -122,6 +132,10 @@ impl Default for GovernanceState {
             crdt_state: GovernanceCRDT::default(),
             subscriptions: HashMap::new(),
             peers: HashMap::new(),
+            processed_events: HashSet::new(),
+            committee_count,
+            subscriber_count: 0,
+            total_participants: committee_count,
             committee_state: None,
             chain_indexer: None,
             storage: None,
@@ -629,6 +643,16 @@ impl GovernanceState {
         hasher.update(state_bytes);
         general_purpose::STANDARD.encode(hasher.finalize())
     }
+    
+    fn get_event_id(&self, event: &GovernanceEvent) -> String {
+        match event {
+            GovernanceEvent::ProposalCreated(proposal) => format!("proposal_{}", proposal.id),
+            GovernanceEvent::VoteCast(vote) => format!("vote_{}_{}", vote.proposal_id, vote.voter),
+            GovernanceEvent::DiscussionAdded(msg) => format!("discussion_{}", msg.id),
+            GovernanceEvent::CommitteeMemberAdded(member) => format!("member_added_{}", member),
+            GovernanceEvent::CommitteeMemberRemoved(member) => format!("member_removed_{}", member),
+        }
+    }
 
     fn verify_node_credentials(&self, _request: &JoinRequest) -> bool {
         true
@@ -652,6 +676,40 @@ impl GovernanceState {
 
     async fn broadcast_to_committee_except(&mut self, _update: StateUpdate, _except: String) -> Result<(), String> {
         Ok(())
+    }
+
+    async fn broadcast_membership_update(&mut self) {
+        // Create a membership update message with all counts
+        let committee_count = self.committee_members.len();
+        let subscriber_count = self.subscriptions.len();
+        let total_participants = committee_count + subscriber_count;
+        
+        logging::info!("Broadcasting membership update: {} committee members, {} subscribers, {} total", 
+                       committee_count, subscriber_count, total_participants);
+        
+        // Create event with all count info encoded
+        let event = GovernanceEvent::CommitteeMemberAdded(format!("counts:{}:{}:{}", 
+                                                                  committee_count, 
+                                                                  subscriber_count, 
+                                                                  total_participants));
+        let update = CallerStateUpdate {
+            event: convert_governance_event_to_caller(event),
+            signature: vec![],
+        };
+        
+        // Notify all subscribers about the membership change
+        for subscription in self.subscriptions.values() {
+            let target = Address::new(&subscription.subscriber, OUR_PROCESS);
+            let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, update.clone()).await;
+        }
+        
+        // Also notify all committee members
+        for member in &self.committee_members {
+            if member != &our().node {
+                let target = Address::new(member, OUR_PROCESS);
+                let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, update.clone()).await;
+            }
+        }
     }
 
     fn get_events_since_vector_clock(&self, since_clock: Vec<(String, u64)>) -> Vec<GovernanceEvent> {
@@ -863,7 +921,25 @@ impl GovernanceState {
                     // Send subscription request
                     let subscriber_node = our_node.clone();
                     match caller_utils::governance::handle_subscription_remote_rpc(&target, subscriber_node).await {
-                        Ok(Ok(subscription_id)) => {
+                        Ok(Ok(response)) => {
+                            // Parse the subscription ID and counts from response
+                            let parts: Vec<&str> = response.split('|').collect();
+                            let subscription_id = parts[0].to_string();
+                            
+                            // Parse counts if present
+                            if let Some(counts_part) = parts.iter().find(|s| s.starts_with("counts:")) {
+                                if let Some(counts_str) = counts_part.strip_prefix("counts:") {
+                                    let count_parts: Vec<&str> = counts_str.split(':').collect();
+                                    if count_parts.len() >= 3 {
+                                        self.committee_count = count_parts[0].parse().unwrap_or(0);
+                                        self.subscriber_count = count_parts[1].parse().unwrap_or(0);
+                                        self.total_participants = count_parts[2].parse().unwrap_or(0);
+                                        logging::info!("Updated counts - Committee: {}, Subscribers: {}, Total: {}", 
+                                                     self.committee_count, self.subscriber_count, self.total_participants);
+                                    }
+                                }
+                            }
+                            
                             logging::info!("Successfully subscribed to committee member {} with ID: {}", committee_member, subscription_id);
                             subscription_success = true;
                             break;
@@ -905,6 +981,77 @@ impl GovernanceState {
         }).to_string())
     }
 
+    #[http]
+    async fn edit_draft(&mut self, request_body: String) -> Result<String, String> {
+        let req: serde_json::Value = serde_json::from_str(&request_body)
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        
+        let draft_id = req.get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing draft id")?;
+        
+        // Check if draft exists and user is the author
+        let draft = self.proposal_drafts.get(draft_id)
+            .ok_or("Draft not found")?;
+        
+        if draft.author != our().node {
+            return Err("Only the author can edit this draft".to_string());
+        }
+        
+        // Update the draft
+        let mut updated_draft = draft.clone();
+        if let Some(title) = req.get("title").and_then(|v| v.as_str()) {
+            updated_draft.title = title.to_string();
+        }
+        if let Some(description) = req.get("description").and_then(|v| v.as_str()) {
+            updated_draft.description = description.to_string();
+        }
+        updated_draft.updated_at = chrono::Utc::now().to_rfc3339();
+        
+        self.proposal_drafts.insert(draft_id.to_string(), updated_draft.clone());
+        
+        // Persist to VFS
+        if let Some(storage) = &self.storage {
+            let _ = storage.save_drafts(&self.proposal_drafts);
+        }
+        
+        Ok(json!({
+            "success": true,
+            "draft": updated_draft
+        }).to_string())
+    }
+    
+    #[http]
+    async fn delete_draft(&mut self, request_body: String) -> Result<String, String> {
+        let req: serde_json::Value = serde_json::from_str(&request_body)
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        
+        let draft_id = req.get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing draft id")?;
+        
+        // Check if draft exists and user is the author
+        let draft = self.proposal_drafts.get(draft_id)
+            .ok_or("Draft not found")?;
+        
+        if draft.author != our().node {
+            return Err("Only the author can delete this draft".to_string());
+        }
+        
+        // Remove the draft
+        self.proposal_drafts.remove(draft_id);
+        
+        // Persist to VFS
+        if let Some(storage) = &self.storage {
+            let _ = storage.save_drafts(&self.proposal_drafts);
+        }
+        
+        Ok(json!({
+            "success": true,
+            "message": "Draft deleted successfully"
+        }).to_string())
+    }
+    
     #[http]
     async fn create_draft(&mut self, request_body: String) -> Result<String, String> {
         let req: CreateDraftRequest = serde_json::from_str(&request_body)
@@ -990,6 +1137,25 @@ impl GovernanceState {
     }
 
     #[http]
+    async fn get_discussions(&self, request_body: String) -> Result<String, String> {
+        let req: serde_json::Value = serde_json::from_str(&request_body)
+            .map_err(|e| format!("Invalid request: {}", e))?;
+        
+        let proposal_id = req.get("proposal_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing proposal_id")?;
+        
+        let discussions = self.discussions.get(proposal_id)
+            .cloned()
+            .unwrap_or_default();
+        
+        Ok(json!({
+            "success": true,
+            "discussions": discussions
+        }).to_string())
+    }
+    
+    #[http]
     async fn add_discussion(&mut self, request_body: String) -> Result<String, String> {
         let req: AddDiscussionRequest = serde_json::from_str(&request_body)
             .map_err(|e| format!("Invalid request: {}", e))?;
@@ -1041,27 +1207,31 @@ impl GovernanceState {
 
     #[http]
     async fn get_committee_status(&self) -> Result<String, String> {
-        // Count actual online committee members properly
-        let online_count = if let Some(committee_state) = &self.committee_state {
-            // Count committee members who have sent recent keepalives
-            committee_state.peers.values()
-                .filter(|p| p.is_committee && p.is_online())
-                .count()
+        // Use stored counts if available, otherwise calculate from local state
+        let committee_count = if self.committee_count > 0 {
+            self.committee_count
         } else {
-            // If no committee state, check if we're online
-            if self.is_committee_member { 1 } else { 0 }
+            self.committee_members.len()
         };
-
-        // Count subscribers
-        let subscriber_count = self.subscriptions.len();
+        
+        let subscriber_count = if self.subscriber_count > 0 {
+            self.subscriber_count
+        } else {
+            self.subscriptions.len()
+        };
+        
+        let total_participants = if self.total_participants > 0 {
+            self.total_participants
+        } else {
+            committee_count + subscriber_count
+        };
 
         Ok(json!({
             "members": self.committee_members,
             "is_member": self.is_committee_member,
-            "online_count": online_count,
-            "committee_count": self.committee_members.len(),
+            "committee_count": committee_count,
             "subscriber_count": subscriber_count,
-            "total_participants": self.committee_members.len() + subscriber_count
+            "total_participants": total_participants
         }).to_string())
     }
 
@@ -1229,20 +1399,30 @@ impl GovernanceState {
     }
 
     #[http]
-    async fn request_join_committee(&mut self, request_body: String) -> Result<String, String> {
-        let req: serde_json::Value = serde_json::from_str(&request_body)
-            .unwrap_or_else(|_| json!({}));
+    async fn request_join_committee(&mut self, _request_body: String) -> Result<String, String> {
+        // Check if already a committee member
+        if self.is_committee_member {
+            return Ok(json!({
+                "success": false,
+                "message": "Already a committee member"
+            }).to_string());
+        }
 
-        let target_nodes: Vec<String> = req.get("target_nodes")
-            .and_then(|n| n.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            .unwrap_or_else(|| {
-                // Default committee bootstrap nodes
-                vec![
-                    "committee-1.hypr".to_string(),
-                    "committee-2.hypr".to_string(),
-                ]
-            });
+        // Get list of committee members to try
+        let mut target_nodes: Vec<String> = self.committee_members.iter().cloned().collect();
+        
+        // If no known committee members, use default bootstrap nodes
+        if target_nodes.is_empty() {
+            target_nodes = vec![
+                "nick.hypr".to_string(),
+                "nick1udwig.os".to_string(),
+            ];
+        }
+        
+        // Shuffle the list to try random members
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        target_nodes.shuffle(&mut rng);
 
         // Create join request
         let join_request = JoinRequest {
@@ -1252,8 +1432,8 @@ impl GovernanceState {
         };
 
         // Try joining through each target node
-        for node in target_nodes {
-            let target = Address::new(&node, OUR_PROCESS);
+        for node in target_nodes.iter().take(5) { // Try up to 5 members
+            let target = Address::new(node, OUR_PROCESS);
 
             // Use the generated RPC stub
             // Convert to caller_utils type
@@ -1268,6 +1448,30 @@ impl GovernanceState {
                         // Update our state
                         self.committee_members = HashSet::from_iter(response.members.clone());
                         self.is_committee_member = true;
+
+                        // Parse counts from reason field
+                        let mut committee_count = self.committee_members.len();
+                        let mut subscriber_count = 0;
+                        let mut total_participants = committee_count;
+                        
+                        if let Some(counts_part) = response.reason.split('|').find(|s| s.starts_with("counts:")) {
+                            if let Some(counts_str) = counts_part.strip_prefix("counts:") {
+                                let parts: Vec<&str> = counts_str.split(':').collect();
+                                if parts.len() >= 3 {
+                                    committee_count = parts[0].parse().unwrap_or(committee_count);
+                                    subscriber_count = parts[1].parse().unwrap_or(0);
+                                    total_participants = parts[2].parse().unwrap_or(committee_count + subscriber_count);
+                                }
+                            }
+                        }
+                        
+                        // Update our counts
+                        self.subscriber_count = subscriber_count;
+                        self.committee_count = committee_count;
+                        self.total_participants = total_participants;
+                        
+                        logging::info!("Joined committee - Committee members: {}, Subscribers: {}, Total participants: {}", 
+                                     committee_count, subscriber_count, total_participants);
 
                         // Initialize committee state if needed
                         if self.committee_state.is_none() {
@@ -1291,7 +1495,7 @@ impl GovernanceState {
                         }
 
                         // Start syncing with the committee
-                        let _ = self.initiate_sync(node, response.state_hash).await;
+                        let _ = self.initiate_sync(node.to_string(), response.state_hash).await;
 
                         return Ok(json!({
                             "success": true,
@@ -1336,7 +1540,23 @@ impl GovernanceState {
 
         // Send subscription request
         match caller_utils::governance::handle_subscription_remote_rpc(&target, our().node.clone()).await {
-            Ok(Ok(subscription_id)) => {
+            Ok(Ok(response)) => {
+                // Parse the subscription ID and counts from response
+                let parts: Vec<&str> = response.split('|').collect();
+                let subscription_id = parts[0].to_string();
+                
+                // Parse counts if present
+                if let Some(counts_part) = parts.iter().find(|s| s.starts_with("counts:")) {
+                    if let Some(counts_str) = counts_part.strip_prefix("counts:") {
+                        let count_parts: Vec<&str> = counts_str.split(':').collect();
+                        if count_parts.len() >= 3 {
+                            self.committee_count = count_parts[0].parse().unwrap_or(0);
+                            self.subscriber_count = count_parts[1].parse().unwrap_or(0);
+                            self.total_participants = count_parts[2].parse().unwrap_or(0);
+                        }
+                    }
+                }
+                
                 Ok(json!({
                     "success": true,
                     "subscription_id": subscription_id,
@@ -1408,7 +1628,10 @@ impl GovernanceState {
 
     #[remote]
     async fn handle_join_request(&mut self, request: JoinRequest) -> Result<JoinResponse, String> {
+        logging::info!("Received join request from {}", request.node_id);
+        
         if !self.verify_node_credentials(&request) {
+            logging::info!("Rejected join request from {} - invalid credentials", request.node_id);
             return Ok(JoinResponse {
                 approved: false,
                 members: vec![],
@@ -1418,29 +1641,89 @@ impl GovernanceState {
             });
         }
 
+        // Check if this node was previously a subscriber and remove them
+        let was_subscriber = self.subscriptions.contains_key(&request.node_id);
+        if was_subscriber {
+            self.subscriptions.remove(&request.node_id);
+            logging::info!("Promoting subscriber {} to committee member", request.node_id);
+        }
+        
         self.committee_members.insert(request.node_id.clone());
 
         // Log at info level with both committee and subscriber counts
         logging::info!("New committee member joined: {} | Total committee members: {} | Total subscribers: {}", 
                        request.node_id, self.committee_members.len(), self.subscriptions.len());
 
+        // Select a random committee member to handle this node's subscription
+        let mut committee_vec: Vec<String> = self.committee_members.iter().cloned().collect();
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        committee_vec.shuffle(&mut rng);
+        let subscription_handler = committee_vec.first().cloned().unwrap_or_else(|| our().node.clone());
+
+        // Calculate total participants
+        let committee_count = self.committee_members.len();
+        let subscriber_count = self.subscriptions.len();
+        let total_participants = committee_count + subscriber_count;
+        
         let response = JoinResponse {
             approved: true,
             members: self.committee_members.iter().cloned().collect(),
             state_hash: self.compute_state_hash(),
-            bootstrap_nodes: self.get_active_committee_nodes(),
-            reason: String::new(),
+            bootstrap_nodes: vec![subscription_handler.clone()], // Use first bootstrap node as subscription handler
+            reason: format!("subscription_handler:{}|counts:{}:{}:{}", 
+                          subscription_handler, committee_count, subscriber_count, total_participants), // Pass handler and counts in reason field
         };
+
+        // Broadcast new member to all subscribers
+        self.broadcast_membership_update().await;
 
         Ok(response)
     }
 
     #[remote]
     async fn handle_state_update(&mut self, update: StateUpdate) -> Result<String, String> {
+        logging::info!("Received state update: {:?}", update.event);
+        
+        // Get the sender to avoid echoing back
+        let sender = source().node;
+        
         if !self.verify_event_signature(&update.event, &update.signature) {
+            logging::info!("Rejected state update - invalid signature");
             return Err("Invalid signature".to_string());
         }
 
+        // Check if we've already processed this event to prevent infinite loops
+        let event_id = self.get_event_id(&update.event);
+        if self.processed_events.contains(&event_id) {
+            logging::info!("Already processed event {}, skipping", event_id);
+            return Ok("Already processed".to_string());
+        }
+        self.processed_events.insert(event_id.clone());
+        
+        // Keep only recent events to prevent memory growth
+        if self.processed_events.len() > 1000 {
+            self.processed_events.clear();
+        }
+
+        // Handle special count updates from membership changes
+        if let GovernanceEvent::CommitteeMemberAdded(ref data) = update.event {
+            if data.starts_with("counts:") {
+                // Parse counts from the data: "counts:committee:subscribers:total"
+                let parts: Vec<&str> = data.split(':').collect();
+                if parts.len() == 4 {
+                    if let (Ok(committee), Ok(subscribers), Ok(total)) = 
+                        (parts[1].parse::<usize>(), parts[2].parse::<usize>(), parts[3].parse::<usize>()) {
+                        logging::info!("Received count update: {} committee, {} subscribers, {} total", committee, subscribers, total);
+                        // Update our local counts
+                        self.committee_count = committee;
+                        self.subscriber_count = subscribers;
+                        self.total_participants = total;
+                    }
+                }
+            }
+        }
+        
         // Apply the update to our CRDT
         self.apply_event_to_crdt(update.event.clone());
 
@@ -1474,13 +1757,12 @@ impl GovernanceState {
                 signature: update.signature.clone(),
             };
 
-            // Broadcast to other committee members
-            if let Some(committee_state) = &self.committee_state {
-                for member in &committee_state.crdt.committee_members {
-                    if member != &our().node {
-                        let target = Address::new(member, OUR_PROCESS);
-                        let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await;
-                    }
+            // Broadcast to ALL other committee members (use self.committee_members, not committee_state)
+            for member in &self.committee_members {
+                if member != &our().node && member != &sender {
+                    let target = Address::new(member, OUR_PROCESS);
+                    logging::info!("Broadcasting update to committee member: {}", member);
+                    let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await;
                 }
             }
 
@@ -1502,6 +1784,8 @@ impl GovernanceState {
 
     #[remote]
     async fn handle_sync_request(&mut self, request: SyncRequest) -> Result<SyncResponse, String> {
+        logging::info!("Received sync request: {:?}", request.sync_type);
+        
         let response = match request.sync_type {
             SyncType::Full => {
                 let snapshot = bincode::serialize(&self.crdt_state)
@@ -1529,7 +1813,15 @@ impl GovernanceState {
             return Err("At capacity".to_string());
         }
 
-        let subscription_id = generate_id();
+        // Use the sender's node ID as the subscription ID
+        let sender_node = source().node;
+        let subscription_id = sender_node.to_string();
+
+        // Check if this node is already subscribed
+        if self.subscriptions.contains_key(&subscription_id) {
+            logging::info!("Node {} is already subscribed", sender_node);
+            return Ok(subscription_id);
+        }
 
         let subscription = Subscription {
             id: subscription_id.clone(),
@@ -1543,17 +1835,25 @@ impl GovernanceState {
         self.subscriptions.insert(subscription_id.clone(), subscription.clone());
 
         // Log at info level with both committee and subscriber counts
+        let committee_count = self.committee_members.len();
+        let subscriber_count = self.subscriptions.len();
+        let total_participants = committee_count + subscriber_count;
+        
         logging::info!("New subscription from {} | Committee members: {} | Total subscribers: {}", 
-                       subscriber, self.committee_members.len(), self.subscriptions.len());
+                       sender_node, committee_count, subscriber_count);
 
-        // Return the subscription ID
-        Ok(subscription_id)
+        // Broadcast the membership update to all participants
+        self.broadcast_membership_update().await;
+
+        // Return the subscription ID with counts embedded in response
+        Ok(format!("{}|counts:{}:{}:{}", subscription_id, committee_count, subscriber_count, total_participants))
     }
 
     #[remote]
     async fn handle_keepalive(&mut self, _timestamp: u64, state_hash: String) -> Result<String, String> {
         // Update peer info
         let sender = source().node;
+        logging::info!("Received keepalive from {} with state hash {}", sender, state_hash);
 
         let peer_info = PeerInfo {
             node_id: sender.clone(),
@@ -1630,7 +1930,23 @@ impl GovernanceState {
                         for committee_member in self.committee_members.iter().take(3) {
                             let target = Address::new(committee_member, OUR_PROCESS);
                             match caller_utils::governance::handle_subscription_remote_rpc(&target, our_node.clone()).await {
-                                Ok(Ok(subscription_id)) => {
+                                Ok(Ok(response)) => {
+                                    // Parse the subscription ID and counts from response
+                                    let parts: Vec<&str> = response.split('|').collect();
+                                    let subscription_id = parts[0].to_string();
+                                    
+                                    // Parse counts if present
+                                    if let Some(counts_part) = parts.iter().find(|s| s.starts_with("counts:")) {
+                                        if let Some(counts_str) = counts_part.strip_prefix("counts:") {
+                                            let count_parts: Vec<&str> = counts_str.split(':').collect();
+                                            if count_parts.len() >= 3 {
+                                                self.committee_count = count_parts[0].parse().unwrap_or(0);
+                                                self.subscriber_count = count_parts[1].parse().unwrap_or(0);
+                                                self.total_participants = count_parts[2].parse().unwrap_or(0);
+                                            }
+                                        }
+                                    }
+                                    
                                     logging::info!("Successfully subscribed to committee member {} with ID: {}", committee_member, subscription_id);
                                     subscription_success = true;
                                     break;

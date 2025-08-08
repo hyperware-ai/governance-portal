@@ -16,11 +16,8 @@ export const CommitteeStatus: React.FC = () => {
   }, []);
 
   const handleJoinCommittee = async () => {
-    const targetNode = prompt('Enter target node address to join committee:');
-    if (targetNode) {
-      await joinCommittee([targetNode]);
-      await fetchCommitteeStatus();
-    }
+    await joinCommittee([]); // No target nodes needed, will auto-select
+    await fetchCommitteeStatus();
   };
 
   if (isLoading && !committeeStatus) {
@@ -39,10 +36,6 @@ export const CommitteeStatus: React.FC = () => {
           <div className="status-item">
             <span className="label">Subscribers:</span>
             <span className="value">{committeeStatus.subscriber_count || 0}</span>
-          </div>
-          <div className="status-item">
-            <span className="label">Online Members:</span>
-            <span className="value">{committeeStatus.online_count}</span>
           </div>
           <div className="status-item">
             <span className="label">Total Participants:</span>

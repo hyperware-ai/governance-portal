@@ -34,7 +34,10 @@ interface GovernanceStore {
   
   fetchProposals: () => Promise<void>;
   createDraft: (title: string, description: string) => Promise<void>;
+  editDraft: (id: string, title?: string, description?: string) => Promise<void>;
+  deleteDraft: (id: string) => Promise<void>;
   addDiscussion: (proposalId: string, content: string, parentId?: string) => Promise<void>;
+  fetchDiscussions: (proposalId: string) => Promise<void>;
   fetchCommitteeStatus: () => Promise<void>;
   fetchVotingPower: (address?: string) => Promise<void>;
   joinCommittee: (targetNodes: string[]) => Promise<void>;
@@ -92,6 +95,71 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     } catch (error) {
       set({ 
         error: error instanceof Error ? error.message : 'Failed to create draft',
+        isLoading: false 
+      });
+    }
+  },
+
+  editDraft: async (id: string, title?: string, description?: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const payload = JSON.stringify({ id, title, description });
+      const response = await api.editDraft(payload);
+      const result = parseApiResponse<{ success: boolean, draft?: any }>(response);
+      if (result.success) {
+        await get().fetchProposals();
+      }
+      set({ isLoading: false });
+    } catch (error) {
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to edit draft',
+        isLoading: false 
+      });
+    }
+  },
+
+  deleteDraft: async (id: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const payload = JSON.stringify({ id });
+      const response = await api.deleteDraft(payload);
+      const result = parseApiResponse<{ success: boolean }>(response);
+      if (result.success) {
+        await get().fetchProposals();
+      }
+      set({ isLoading: false });
+    } catch (error) {
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to delete draft',
+        isLoading: false 
+      });
+    }
+  },
+
+  fetchDiscussions: async (proposalId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const payload = JSON.stringify({ proposal_id: proposalId });
+      const response = await fetch('/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ GetDiscussions: payload })
+      });
+      const result = await response.json();
+      if (result.Ok) {
+        const data = JSON.parse(result.Ok);
+        if (data.success) {
+          set(state => {
+            const discussions = new Map(state.discussions);
+            discussions.set(proposalId, data.discussions || []);
+            return { discussions, isLoading: false };
+          });
+        }
+      }
+      set({ isLoading: false });
+    } catch (error) {
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to fetch discussions',
         isLoading: false 
       });
     }

@@ -117,20 +117,76 @@ const ProposalCard: React.FC<ProposalCardProps> = ({ proposal, onSelect }) => {
 };
 
 const DraftCard: React.FC<{ draft: any }> = ({ draft }) => {
+  const { editDraft, deleteDraft } = useGovernanceStore();
+  // Get current node from window.our if available
+  const currentNode = (window as any).our?.node || '';
+  const isAuthor = draft.author === currentNode;
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [editTitle, setEditTitle] = React.useState(draft.title);
+  const [editDescription, setEditDescription] = React.useState(draft.description);
+  
+  const handleEdit = async () => {
+    if (isEditing) {
+      await editDraft(draft.id, editTitle, editDescription);
+      setIsEditing(false);
+    } else {
+      setIsEditing(true);
+    }
+  };
+  
+  const handleDelete = async () => {
+    if (confirm('Are you sure you want to delete this draft?')) {
+      await deleteDraft(draft.id);
+    }
+  };
+  
+  const handleSubmit = () => {
+    // TODO: Implement submit to chain functionality
+    alert('Submit to chain functionality not yet implemented');
+  };
+  
   return (
     <div className="draft-card">
-      <h3>{draft.title}</h3>
+      {isEditing ? (
+        <>
+          <input 
+            type="text" 
+            value={editTitle} 
+            onChange={(e) => setEditTitle(e.target.value)}
+            placeholder="Title"
+            style={{ width: '100%', marginBottom: '10px' }}
+          />
+          <textarea 
+            value={editDescription} 
+            onChange={(e) => setEditDescription(e.target.value)}
+            placeholder="Description"
+            style={{ width: '100%', minHeight: '100px', marginBottom: '10px' }}
+          />
+        </>
+      ) : (
+        <>
+          <h3>{draft.title}</h3>
+          <p className="description">{draft.description}</p>
+        </>
+      )}
       <p className="author">by {draft.author}</p>
-      <p className="description">{draft.description}</p>
       <div className="timestamps">
         <span>Created: {new Date(draft.created_at).toLocaleDateString()}</span>
         <span>Updated: {new Date(draft.updated_at).toLocaleDateString()}</span>
       </div>
-      <div className="actions">
-        <button>Edit</button>
-        <button>Submit to Chain</button>
-        <button>Delete</button>
-      </div>
+      {isAuthor && (
+        <div className="actions">
+          <button onClick={handleEdit}>{isEditing ? 'Save' : 'Edit'}</button>
+          {isEditing && <button onClick={() => setIsEditing(false)}>Cancel</button>}
+          {!isEditing && <button onClick={handleSubmit}>Submit to Chain</button>}
+          {!isEditing && <button onClick={handleDelete}>Delete</button>}
+        </div>
+      )}
+      {!isAuthor && (
+        <div className="info">
+          <small>Only the author can edit or delete this draft</small>
+        </div>
+      )}
     </div>
   );
 };
