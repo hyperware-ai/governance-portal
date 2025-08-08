@@ -110,10 +110,11 @@ const ProposalCard: React.FC<ProposalCardProps> = ({ proposal, onSelect }) => {
               }}>Vote No</button>
               <button onClick={(e) => {
                 e.stopPropagation();
-              castVote(proposal.id, 'Abstain' as any);
-            }}>Abstain</button>
-          </div>
-        )}
+                castVote(proposal.id, 'Abstain' as any);
+              }}>Abstain</button>
+            </div>
+          )}
+        </div>
       </div>
       <button 
         className="discussion-toggle"
@@ -124,9 +125,8 @@ const ProposalCard: React.FC<ProposalCardProps> = ({ proposal, onSelect }) => {
       >
         {showDiscussion ? 'Hide Discussion' : 'Show Discussion'}
       </button>
-    </div>
-    {showDiscussion && (
-      <div className="discussion-section">
+      {showDiscussion && (
+        <div className="discussion-section">
         <ProposalDiscussion 
           proposalId={proposal.id} 
           proposalTitle={proposal.title}

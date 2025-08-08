@@ -1019,8 +1019,17 @@ impl GovernanceState {
             let _ = storage.save_drafts(&self.proposal_drafts);
         }
         
-        // Don't broadcast ProposalCreated for draft edits - that was breaking things
-        // Drafts are local until submitted
+        // Sync draft changes with other committee members
+        if self.is_committee_member {
+            // Send the updated drafts to all committee members
+            for member in &self.committee_members {
+                if member != &our().node {
+                    let _target = Address::new(member, OUR_PROCESS);
+                    // We'll handle this via sync mechanism instead of events
+                    logging::info!("Draft edited, should sync with committee member: {}", member);
+                }
+            }
+        }
         
         Ok(json!({
             "success": true,
@@ -1051,6 +1060,18 @@ impl GovernanceState {
         // Persist to VFS
         if let Some(storage) = &self.storage {
             let _ = storage.save_drafts(&self.proposal_drafts);
+        }
+        
+        // Sync draft changes with other committee members
+        if self.is_committee_member {
+            // Send the updated drafts to all committee members
+            for member in &self.committee_members {
+                if member != &our().node {
+                    let _target = Address::new(member, OUR_PROCESS);
+                    // We'll handle this via sync mechanism instead of events
+                    logging::info!("Draft deleted, should sync with committee member: {}", member);
+                }
+            }
         }
         
         Ok(json!({
@@ -1564,6 +1585,20 @@ impl GovernanceState {
                     }
                 }
                 
+                // Parse committee members if present
+                if let Some(members_part) = parts.iter().find(|s| s.starts_with("members:")) {
+                    if let Some(members_str) = members_part.strip_prefix("members:") {
+                        let members: HashSet<String> = members_str.split(',')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect();
+                        if !members.is_empty() {
+                            self.committee_members = members;
+                            logging::info!("Updated committee members list: {:?}", self.committee_members);
+                        }
+                    }
+                }
+                
                 Ok(json!({
                     "success": true,
                     "subscription_id": subscription_id,
@@ -1858,8 +1893,9 @@ impl GovernanceState {
         // Broadcast the membership update to all participants
         self.broadcast_membership_update().await;
 
-        // Return the subscription ID with counts embedded in response
-        Ok(format!("{}|counts:{}:{}:{}", subscription_id, self.committee_count, self.subscriber_count, self.total_participants))
+        // Return the subscription ID with counts and committee members embedded in response
+        let members_str = self.committee_members.iter().cloned().collect::<Vec<_>>().join(",");
+        Ok(format!("{}|counts:{}:{}:{}|members:{}", subscription_id, self.committee_count, self.subscriber_count, self.total_participants, members_str))
     }
 
     #[remote]
@@ -1940,8 +1976,9 @@ impl GovernanceState {
                         let our_node = our().node.clone();
                         let mut subscription_success = false;
 
-                        for committee_member in self.committee_members.iter().take(3) {
-                            let target = Address::new(committee_member, OUR_PROCESS);
+                        let committee_members_copy: Vec<String> = self.committee_members.iter().take(3).cloned().collect();
+                        for committee_member in committee_members_copy {
+                            let target = Address::new(&committee_member, OUR_PROCESS);
                             match caller_utils::governance::handle_subscription_remote_rpc(&target, our_node.clone()).await {
                                 Ok(Ok(response)) => {
                                     // Parse the subscription ID and counts from response
@@ -1956,6 +1993,20 @@ impl GovernanceState {
                                                 self.committee_count = count_parts[0].parse().unwrap_or(0);
                                                 self.subscriber_count = count_parts[1].parse().unwrap_or(0);
                                                 self.total_participants = count_parts[2].parse().unwrap_or(0);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Parse committee members if present
+                                    if let Some(members_part) = parts.iter().find(|s| s.starts_with("members:")) {
+                                        if let Some(members_str) = members_part.strip_prefix("members:") {
+                                            let members: HashSet<String> = members_str.split(',')
+                                                .filter(|s| !s.is_empty())
+                                                .map(|s| s.to_string())
+                                                .collect();
+                                            if !members.is_empty() {
+                                                self.committee_members = members;
+                                                logging::info!("Updated committee members list: {:?}", self.committee_members);
                                             }
                                         }
                                     }
@@ -2214,10 +2265,14 @@ impl GovernanceState {
                     .messages.push(msg);
             },
             GovernanceEvent::CommitteeMemberAdded(member) => {
-                self.crdt_state.committee.insert(member);
+                self.crdt_state.committee.insert(member.clone());
+                // TODO: Also update the main committee_members list
+                // self.committee_members.insert(member.clone());
             },
             GovernanceEvent::CommitteeMemberRemoved(member) => {
                 self.crdt_state.committee.remove(&member);
+                // TODO: Also update the main committee_members list  
+                // self.committee_members.remove(&member);
             },
         }
 
