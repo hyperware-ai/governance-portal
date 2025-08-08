@@ -679,19 +679,15 @@ impl GovernanceState {
     }
 
     async fn broadcast_membership_update(&mut self) {
-        // Create a membership update message with all counts
-        let committee_count = self.committee_members.len();
-        let subscriber_count = self.subscriptions.len();
-        let total_participants = committee_count + subscriber_count;
-        
+        // Use the global counts, not just local
         logging::info!("Broadcasting membership update: {} committee members, {} subscribers, {} total", 
-                       committee_count, subscriber_count, total_participants);
+                       self.committee_count, self.subscriber_count, self.total_participants);
         
         // Create event with all count info encoded
         let event = GovernanceEvent::CommitteeMemberAdded(format!("counts:{}:{}:{}", 
-                                                                  committee_count, 
-                                                                  subscriber_count, 
-                                                                  total_participants));
+                                                                  self.committee_count, 
+                                                                  self.subscriber_count, 
+                                                                  self.total_participants));
         let update = CallerStateUpdate {
             event: convert_governance_event_to_caller(event),
             signature: vec![],
@@ -864,6 +860,14 @@ impl GovernanceState {
                 // Initialize committee state
                 let node_id = our().node.clone();
                 self.committee_state = Some(p2p_committee::CommitteeState::new(node_id));
+                
+                // Initialize counts - for committee members, the base count is the default committee size
+                self.committee_count = self.committee_members.len();
+                self.subscriber_count = self.subscriptions.len();
+                self.total_participants = self.committee_count + self.subscriber_count;
+                
+                logging::info!("Initialized with {} committee members, {} subscribers", 
+                             self.committee_count, self.subscriber_count);
 
                 if let Ok(last_block) = storage.load_metadata() {
                     self.last_indexed_block = last_block;
@@ -1014,6 +1018,9 @@ impl GovernanceState {
         if let Some(storage) = &self.storage {
             let _ = storage.save_drafts(&self.proposal_drafts);
         }
+        
+        // Don't broadcast ProposalCreated for draft edits - that was breaking things
+        // Drafts are local until submitted
         
         Ok(json!({
             "success": true,
@@ -1645,14 +1652,20 @@ impl GovernanceState {
         let was_subscriber = self.subscriptions.contains_key(&request.node_id);
         if was_subscriber {
             self.subscriptions.remove(&request.node_id);
+            self.subscriber_count = self.subscriptions.len();
             logging::info!("Promoting subscriber {} to committee member", request.node_id);
         }
         
         self.committee_members.insert(request.node_id.clone());
+        
+        // Update global counts
+        self.committee_count = self.committee_members.len();
+        self.subscriber_count = self.subscriptions.len();
+        self.total_participants = self.committee_count + self.subscriber_count;
 
         // Log at info level with both committee and subscriber counts
         logging::info!("New committee member joined: {} | Total committee members: {} | Total subscribers: {}", 
-                       request.node_id, self.committee_members.len(), self.subscriptions.len());
+                       request.node_id, self.committee_count, self.subscriber_count);
 
         // Select a random committee member to handle this node's subscription
         let mut committee_vec: Vec<String> = self.committee_members.iter().cloned().collect();
@@ -1834,19 +1847,19 @@ impl GovernanceState {
 
         self.subscriptions.insert(subscription_id.clone(), subscription.clone());
 
-        // Log at info level with both committee and subscriber counts
-        let committee_count = self.committee_members.len();
-        let subscriber_count = self.subscriptions.len();
-        let total_participants = committee_count + subscriber_count;
+        // Update global counts
+        self.subscriber_count = self.subscriptions.len();
+        self.total_participants = self.committee_count + self.subscriber_count;
         
+        // Log at info level with both committee and subscriber counts
         logging::info!("New subscription from {} | Committee members: {} | Total subscribers: {}", 
-                       sender_node, committee_count, subscriber_count);
+                       sender_node, self.committee_count, self.subscriber_count);
 
         // Broadcast the membership update to all participants
         self.broadcast_membership_update().await;
 
         // Return the subscription ID with counts embedded in response
-        Ok(format!("{}|counts:{}:{}:{}", subscription_id, committee_count, subscriber_count, total_participants))
+        Ok(format!("{}|counts:{}:{}:{}", subscription_id, self.committee_count, self.subscriber_count, self.total_participants))
     }
 
     #[remote]
@@ -2122,7 +2135,7 @@ impl GovernanceState {
             let signature = vec![];
 
             let state_update = P2PMessage::StateUpdate {
-                event,
+                event: event.clone(),
                 vector_clock: committee_state.crdt.vector_clock.to_vec(),
                 signature,
                 propagation_path: vec![our().node.clone()],
@@ -2134,6 +2147,20 @@ impl GovernanceState {
                 state_update,
                 Some(&our().node)
             ).await;
+            
+            // Also broadcast to subscribers if we're a committee member
+            if committee_state.is_committee_member && !self.subscriptions.is_empty() {
+                logging::info!("Broadcasting event to {} subscribers", self.subscriptions.len());
+                let caller_update = CallerStateUpdate {
+                    event: convert_governance_event_to_caller(event.clone()),
+                    signature: vec![],
+                };
+                
+                for subscription in self.subscriptions.values() {
+                    let target = Address::new(&subscription.subscriber, OUR_PROCESS);
+                    let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await;
+                }
+            }
         } else {
             // Fallback to old CRDT if committee state not initialized
             self.apply_event_to_crdt(event);
@@ -2146,7 +2173,32 @@ impl GovernanceState {
         match event {
             GovernanceEvent::ProposalCreated(data) => {
                 self.crdt_state.proposals.insert(data.id.clone());
-                self.crdt_state.proposal_data.insert(data.id.clone(), data);
+                self.crdt_state.proposal_data.insert(data.id.clone(), data.clone());
+                
+                // Create or update the draft
+                if let Some(existing_draft) = self.proposal_drafts.get_mut(&data.id) {
+                    // Update existing draft (for edit broadcasts)
+                    existing_draft.title = data.title;
+                    existing_draft.description = data.description;
+                    existing_draft.updated_at = chrono::Utc::now().to_rfc3339();
+                } else {
+                    // Create new draft from proposal data (for new proposals from other nodes)
+                    let draft = ProposalDraft {
+                        id: data.id.clone(),
+                        author: data.author.clone(),
+                        title: data.title,
+                        description: data.description,
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                        updated_at: chrono::Utc::now().to_rfc3339(),
+                        signatures: vec![],
+                    };
+                    self.proposal_drafts.insert(data.id, draft);
+                }
+                
+                // Persist drafts
+                if let Some(storage) = &self.storage {
+                    let _ = storage.save_drafts(&self.proposal_drafts);
+                }
             },
             GovernanceEvent::VoteCast(vote) => {
                 // VoteRecord already includes proposal_id

@@ -140,21 +140,14 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const payload = JSON.stringify({ proposal_id: proposalId });
-      const response = await fetch('/api', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ GetDiscussions: payload })
-      });
-      const result = await response.json();
-      if (result.Ok) {
-        const data = JSON.parse(result.Ok);
-        if (data.success) {
-          set(state => {
-            const discussions = new Map(state.discussions);
-            discussions.set(proposalId, data.discussions || []);
-            return { discussions, isLoading: false };
-          });
-        }
+      const response = await api.getDiscussions(payload);
+      const result = parseApiResponse<{ success: boolean, discussions: any[] }>(response);
+      if (result.success) {
+        set(state => {
+          const discussions = new Map(state.discussions);
+          discussions.set(proposalId, result.discussions || []);
+          return { discussions, isLoading: false };
+        });
       }
       set({ isLoading: false });
     } catch (error) {

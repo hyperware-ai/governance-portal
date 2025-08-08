@@ -1,6 +1,7 @@
 import React from 'react';
 import { useGovernanceStore } from '../store/governance';
 import { ProposalStatus } from '../types/governance';
+import { ProposalDiscussion } from './ProposalDiscussion';
 
 interface ProposalListProps {
   onSelectProposal?: (proposalId: string) => void;
@@ -78,41 +79,61 @@ interface ProposalCardProps {
 
 const ProposalCard: React.FC<ProposalCardProps> = ({ proposal, onSelect }) => {
   const { castVote } = useGovernanceStore();
+  const [showDiscussion, setShowDiscussion] = React.useState(false);
   
   return (
-    <div className="proposal-card" onClick={() => onSelect?.(proposal.id)} style={{ cursor: onSelect ? 'pointer' : 'default' }}>
-      <h3>{proposal.title || `Proposal #${proposal.id}`}</h3>
-      <p className="proposer">by {proposal.proposer}</p>
-      <p className="description">{proposal.description?.slice(0, 200)}...</p>
-      <div className="status">
-        <span className={`status-badge ${proposal.status.toLowerCase()}`}>
-          {proposal.status}
-        </span>
-      </div>
-      <div className="voting">
-        <div className="vote-counts">
-          <span>For: {proposal.votes_for}</span>
-          <span>Against: {proposal.votes_against}</span>
-          <span>Abstain: {proposal.votes_abstain}</span>
+    <div className="proposal-card">
+      <div onClick={() => onSelect?.(proposal.id)} style={{ cursor: onSelect ? 'pointer' : 'default' }}>
+        <h3>{proposal.title || `Proposal #${proposal.id}`}</h3>
+        <p className="proposer">by {proposal.proposer}</p>
+        <p className="description">{proposal.description?.slice(0, 200)}...</p>
+        <div className="status">
+          <span className={`status-badge ${proposal.status.toLowerCase()}`}>
+            {proposal.status}
+          </span>
         </div>
-        {proposal.status === ProposalStatus.Active && (
-          <div className="vote-buttons">
-            <button onClick={(e) => {
-              e.stopPropagation();
-              castVote(proposal.id, 'Yes' as any);
-            }}>Vote Yes</button>
-            <button onClick={(e) => {
-              e.stopPropagation();
-              castVote(proposal.id, 'No' as any);
-            }}>Vote No</button>
-            <button onClick={(e) => {
-              e.stopPropagation();
+        <div className="voting">
+          <div className="vote-counts">
+            <span>For: {proposal.votes_for}</span>
+            <span>Against: {proposal.votes_against}</span>
+            <span>Abstain: {proposal.votes_abstain}</span>
+          </div>
+          {proposal.status === ProposalStatus.Active && (
+            <div className="vote-buttons">
+              <button onClick={(e) => {
+                e.stopPropagation();
+                castVote(proposal.id, 'Yes' as any);
+              }}>Vote Yes</button>
+              <button onClick={(e) => {
+                e.stopPropagation();
+                castVote(proposal.id, 'No' as any);
+              }}>Vote No</button>
+              <button onClick={(e) => {
+                e.stopPropagation();
               castVote(proposal.id, 'Abstain' as any);
             }}>Abstain</button>
           </div>
         )}
       </div>
+      <button 
+        className="discussion-toggle"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowDiscussion(!showDiscussion);
+        }}
+      >
+        {showDiscussion ? 'Hide Discussion' : 'Show Discussion'}
+      </button>
     </div>
+    {showDiscussion && (
+      <div className="discussion-section">
+        <ProposalDiscussion 
+          proposalId={proposal.id} 
+          proposalTitle={proposal.title}
+        />
+      </div>
+    )}
+  </div>
   );
 };
 
@@ -124,6 +145,7 @@ const DraftCard: React.FC<{ draft: any }> = ({ draft }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState(draft.title);
   const [editDescription, setEditDescription] = React.useState(draft.description);
+  const [showDiscussion, setShowDiscussion] = React.useState(false);
   
   const handleEdit = async () => {
     if (isEditing) {
@@ -185,6 +207,20 @@ const DraftCard: React.FC<{ draft: any }> = ({ draft }) => {
       {!isAuthor && (
         <div className="info">
           <small>Only the author can edit or delete this draft</small>
+        </div>
+      )}
+      <button 
+        className="discussion-toggle"
+        onClick={() => setShowDiscussion(!showDiscussion)}
+      >
+        {showDiscussion ? 'Hide Discussion' : 'Show Discussion'}
+      </button>
+      {showDiscussion && (
+        <div className="discussion-section">
+          <ProposalDiscussion 
+            proposalId={draft.id} 
+            proposalTitle={draft.title}
+          />
         </div>
       )}
     </div>
