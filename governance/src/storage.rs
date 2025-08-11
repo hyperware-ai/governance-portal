@@ -5,7 +5,7 @@ use sha3::{Digest, Sha3_256};
 use chrono::Utc;
 
 use crate::{OnchainProposal, ProposalDraft, Discussion, GovernanceCRDT};
-use crate::p2p_committee::{CommitteeState, CommitteeCRDT, CRDTSnapshot};
+use crate::p2p_committee::{CommitteeCRDT, CRDTSnapshot};
 
 const STORAGE_DRIVE: &str = "governance_data";
 const SNAPSHOTS_DIR: &str = "snapshots";

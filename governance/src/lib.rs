@@ -1,8 +1,8 @@
 use hyperprocess_macro::*;
 
-// Create a module path that the macro expects
-pub mod process_macros {
-    // Define SerdeJsonInto trait that the macro expects
+// The macro expects process_macros to be available 
+// Define it with the SerdeJsonInto trait
+mod process_macros {
     pub trait SerdeJsonInto {
         fn serde_json_into<T: for<'a> serde::Deserialize<'a>>(self) -> Result<T, String>;
     }
@@ -13,6 +13,9 @@ pub mod process_macros {
         }
     }
 }
+
+// Re-export for use in the rest of the code
+use process_macros::SerdeJsonInto;
 use hyperware_process_lib::{
     our,
     homepage::add_to_homepage,
@@ -708,12 +711,12 @@ impl GovernanceState {
         }
     }
 
-    fn get_events_since_vector_clock(&self, since_clock: Vec<(String, u64)>) -> Vec<GovernanceEvent> {
+    fn get_events_since_vector_clock(&self, _since_clock: Vec<(String, u64)>) -> Vec<GovernanceEvent> {
         // Convert vector clock from WIT format to internal format
-        let mut events = Vec::new();
+        let events = Vec::new();
 
         // Check committee state for recent events
-        if let Some(committee_state) = &self.committee_state {
+        if let Some(_committee_state) = &self.committee_state {
             // Get events from CRDT that are newer than the provided vector clock
             // TODO: Implement history tracking in CommitteeCRDT
             // for event in &committee_state.crdt.history {
@@ -1019,17 +1022,20 @@ impl GovernanceState {
             let _ = storage.save_drafts(&self.proposal_drafts);
         }
         
-        // Sync draft changes with other committee members
-        if self.is_committee_member {
-            // Send the updated drafts to all committee members
-            for member in &self.committee_members {
-                if member != &our().node {
-                    let _target = Address::new(member, OUR_PROCESS);
-                    // We'll handle this via sync mechanism instead of events
-                    logging::info!("Draft edited, should sync with committee member: {}", member);
-                }
-            }
-        }
+        // Broadcast the edit as a ProposalCreated event (which acts as an update)
+        let event = GovernanceEvent::ProposalCreated(ProposalData {
+            id: updated_draft.id.clone(),
+            title: updated_draft.title.clone(),
+            description: updated_draft.description.clone(),
+            author: updated_draft.author.clone(),
+            status: ProposalStatus::Pending,
+            voting_start: HLCTimestamp::now(),
+            voting_end: HLCTimestamp::now(),
+            completion_time: None,
+        });
+        
+        // Broadcast to all nodes
+        self.broadcast_event(event).await?;
         
         Ok(json!({
             "success": true,
@@ -1062,17 +1068,12 @@ impl GovernanceState {
             let _ = storage.save_drafts(&self.proposal_drafts);
         }
         
-        // Sync draft changes with other committee members
-        if self.is_committee_member {
-            // Send the updated drafts to all committee members
-            for member in &self.committee_members {
-                if member != &our().node {
-                    let _target = Address::new(member, OUR_PROCESS);
-                    // We'll handle this via sync mechanism instead of events
-                    logging::info!("Draft deleted, should sync with committee member: {}", member);
-                }
-            }
-        }
+        // Broadcast the deletion as a special event
+        // We'll use CommitteeMemberRemoved with a special prefix to indicate draft deletion
+        let event = GovernanceEvent::CommitteeMemberRemoved(format!("draft_deleted:{}", draft_id));
+        
+        // Broadcast to all nodes
+        self.broadcast_event(event).await?;
         
         Ok(json!({
             "success": true,
@@ -1164,74 +1165,18 @@ impl GovernanceState {
         }).to_string())
     }
 
+    // Discussion endpoints removed - no longer supported
+    /*
     #[http]
     async fn get_discussions(&self, request_body: String) -> Result<String, String> {
-        let req: serde_json::Value = serde_json::from_str(&request_body)
-            .map_err(|e| format!("Invalid request: {}", e))?;
-        
-        let proposal_id = req.get("proposal_id")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing proposal_id")?;
-        
-        let discussions = self.discussions.get(proposal_id)
-            .cloned()
-            .unwrap_or_default();
-        
-        Ok(json!({
-            "success": true,
-            "discussions": discussions
-        }).to_string())
+        Err("Discussion feature has been removed".to_string())
     }
     
     #[http]
     async fn add_discussion(&mut self, request_body: String) -> Result<String, String> {
-        let req: AddDiscussionRequest = serde_json::from_str(&request_body)
-            .map_err(|e| format!("Invalid request: {}", e))?;
-
-        let discussion = Discussion {
-            id: generate_id(),
-            proposal_id: req.proposal_id.clone(),
-            parent_id: req.parent_id,
-            author: our().node.clone(),
-            content: req.content,
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            upvotes: 0,
-            downvotes: 0,
-            signatures: vec![],
-        };
-
-        self.discussions
-            .entry(req.proposal_id.clone())
-            .or_insert_with(Vec::new)
-            .push(discussion.clone());
-
-        // Persist to VFS
-        if let Some(storage) = &self.storage {
-            let _ = storage.save_discussions(&self.discussions);
-        }
-
-        // Create Message for CRDT
-        let message = Message {
-            id: discussion.id.clone(),
-            author: discussion.author.clone(),
-            content: discussion.content.clone(),
-            timestamp: HLCTimestamp {
-                wall_time: current_timestamp(),
-                logical: 0,
-                node_id: our().node.clone(),
-            },
-            parent_id: discussion.parent_id.clone(),
-        };
-
-        // Broadcast to committee
-        let event = GovernanceEvent::DiscussionAdded(message);
-        self.broadcast_event(event).await?;
-
-        Ok(json!({
-            "success": true,
-            "discussion": discussion
-        }).to_string())
+        Err("Discussion feature has been removed".to_string())
     }
+    */
 
     #[http]
     async fn get_committee_status(&self) -> Result<String, String> {
@@ -1535,10 +1480,10 @@ impl GovernanceState {
                         // Join request rejected
                     }
                 },
-                Ok(Err(e)) => {
+                Ok(Err(_e)) => {
                     // Remote error from node
                 },
-                Err(e) => {
+                Err(_e) => {
                     // Failed to contact node
                 }
             }
@@ -1772,6 +1717,22 @@ impl GovernanceState {
             }
         }
         
+        // Handle draft deletion events
+        if let GovernanceEvent::CommitteeMemberRemoved(ref data) = update.event {
+            if data.starts_with("draft_deleted:") {
+                // Extract draft ID and remove from local state
+                if let Some(draft_id) = data.strip_prefix("draft_deleted:") {
+                    logging::info!("Received draft deletion for ID: {}", draft_id);
+                    self.proposal_drafts.remove(draft_id);
+                    
+                    // Persist to VFS
+                    if let Some(storage) = &self.storage {
+                        let _ = storage.save_drafts(&self.proposal_drafts);
+                    }
+                }
+            }
+        }
+        
         // Apply the update to our CRDT
         self.apply_event_to_crdt(update.event.clone());
 
@@ -1868,7 +1829,15 @@ impl GovernanceState {
         // Check if this node is already subscribed
         if self.subscriptions.contains_key(&subscription_id) {
             logging::info!("Node {} is already subscribed", sender_node);
-            return Ok(subscription_id);
+            // Still return current counts even if already subscribed
+            let response = format!("{}|counts:{}:{}:{}|members:{}", 
+                subscription_id,
+                self.committee_count,
+                self.subscriber_count,
+                self.total_participants,
+                self.committee_members.iter().cloned().collect::<Vec<_>>().join(",")
+            );
+            return Ok(response);
         }
 
         let subscription = Subscription {
@@ -1890,6 +1859,31 @@ impl GovernanceState {
         logging::info!("New subscription from {} | Committee members: {} | Total subscribers: {}", 
                        sender_node, self.committee_count, self.subscriber_count);
 
+        // Send initial state sync to the new subscriber
+        if !self.proposal_drafts.is_empty() {
+            // Send all current proposal drafts as ProposalCreated events
+            for draft in self.proposal_drafts.values() {
+                let event = GovernanceEvent::ProposalCreated(ProposalData {
+                    id: draft.id.clone(),
+                    title: draft.title.clone(),
+                    description: draft.description.clone(),
+                    author: draft.author.clone(),
+                    status: ProposalStatus::Pending,
+                    voting_start: HLCTimestamp::now(),
+                    voting_end: HLCTimestamp::now(),
+                    completion_time: None,
+                });
+                
+                let update = CallerStateUpdate {
+                    event: convert_governance_event_to_caller(event),
+                    signature: vec![],
+                };
+                
+                let target = Address::new(&sender_node, OUR_PROCESS);
+                let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, update).await;
+            }
+        }
+        
         // Broadcast the membership update to all participants
         self.broadcast_membership_update().await;
 
@@ -1916,7 +1910,7 @@ impl GovernanceState {
         self.peers.insert(sender.clone(), peer_info.clone());
 
         // Also update in committee state if we have one
-        if let Some(committee_state) = &mut self.committee_state {
+        if let Some(_committee_state) = &mut self.committee_state {
             // Use our local PeerInfo struct for now
             // TODO: Sync with committee_state.peers when p2p_committee::PeerInfo is public
         }
@@ -2207,6 +2201,9 @@ impl GovernanceState {
                     signature: vec![],
                 };
                 
+                // Log the event type being broadcast
+                logging::info!("Broadcasting {:?} event to subscribers", self.get_event_id(&event));
+                
                 for subscription in self.subscriptions.values() {
                     let target = Address::new(&subscription.subscriber, OUR_PROCESS);
                     let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await;
@@ -2258,11 +2255,8 @@ impl GovernanceState {
                     .or_insert_with(HashSet::new)
                     .insert(vote);
             },
-            GovernanceEvent::DiscussionAdded(msg) => {
-                self.crdt_state.discussions
-                    .entry(msg.id.clone())
-                    .or_insert_with(DiscussionCRDT::new)
-                    .messages.push(msg);
+            GovernanceEvent::DiscussionAdded(_msg) => {
+                // Discussion feature removed - do nothing
             },
             GovernanceEvent::CommitteeMemberAdded(member) => {
                 self.crdt_state.committee.insert(member.clone());

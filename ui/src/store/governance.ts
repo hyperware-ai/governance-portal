@@ -136,61 +136,14 @@ export const useGovernanceStore = create<GovernanceStore>((set, get) => ({
     }
   },
 
-  fetchDiscussions: async (proposalId: string) => {
-    set({ isLoading: true, error: null });
-    try {
-      const payload = JSON.stringify({ proposal_id: proposalId });
-      const response = await api.getDiscussions(payload);
-      const result = parseApiResponse<{ success: boolean, discussions: any[] }>(response);
-      if (result.success) {
-        set(state => {
-          const discussions = new Map(state.discussions);
-          discussions.set(proposalId, result.discussions || []);
-          return { discussions, isLoading: false };
-        });
-      }
-      set({ isLoading: false });
-    } catch (error) {
-      set({ 
-        error: error instanceof Error ? error.message : 'Failed to fetch discussions',
-        isLoading: false 
-      });
-    }
+  fetchDiscussions: async (_proposalId: string) => {
+    // Discussion feature removed
+    set({ isLoading: false });
   },
 
-  addDiscussion: async (proposalId: string, content: string, parentId?: string) => {
-    set({ isLoading: true, error: null });
-    try {
-      const payload = JSON.stringify({
-        proposal_id: proposalId,
-        content,
-        parent_id: parentId || null
-      });
-      const response = await api.addDiscussion(payload);
-      const result = parseApiResponse<{ success: boolean, discussion?: any }>(response);
-      if (result.success) {
-        set(state => {
-          const discussions = new Map(state.discussions);
-          const proposalDiscussions = discussions.get(proposalId) || [];
-          proposalDiscussions.push(result.discussion);
-          discussions.set(proposalId, proposalDiscussions);
-          return {
-            discussions,
-            isLoading: false
-          };
-        });
-      } else {
-        set({ 
-          error: 'Failed to add discussion',
-          isLoading: false 
-        });
-      }
-    } catch (error) {
-      set({ 
-        error: error instanceof Error ? error.message : 'Failed to add discussion',
-        isLoading: false 
-      });
-    }
+  addDiscussion: async (_proposalId: string, _content: string, _parentId?: string) => {
+    // Discussion feature removed
+    set({ isLoading: false });
   },
 
   fetchCommitteeStatus: async () => {

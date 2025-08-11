@@ -607,7 +607,7 @@ pub struct CommitteeState {
 
 impl CommitteeState {
     pub fn new(node_id: String) -> Self {
-        let mut crdt = CommitteeCRDT::new(node_id.clone());
+        let crdt = CommitteeCRDT::new(node_id.clone());
 
         // Check if this node is a committee member
         let is_committee_member = crdt.committee_members.contains(&node_id);
