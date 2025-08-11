@@ -649,7 +649,10 @@ impl GovernanceState {
     
     fn get_event_id(&self, event: &GovernanceEvent) -> String {
         match event {
-            GovernanceEvent::ProposalCreated(proposal) => format!("proposal_{}", proposal.id),
+            GovernanceEvent::ProposalCreated(proposal) => {
+                // Include timestamp in event ID to make edits unique
+                format!("proposal_{}_{}", proposal.id, proposal.voting_start.wall_time)
+            },
             GovernanceEvent::VoteCast(vote) => format!("vote_{}_{}", vote.proposal_id, vote.voter),
             GovernanceEvent::DiscussionAdded(msg) => format!("discussion_{}", msg.id),
             GovernanceEvent::CommitteeMemberAdded(member) => format!("member_added_{}", member),
@@ -1023,14 +1026,16 @@ impl GovernanceState {
         }
         
         // Broadcast the edit as a ProposalCreated event (which acts as an update)
+        // Use current timestamp to ensure unique event ID for each edit
+        let now = HLCTimestamp::now();
         let event = GovernanceEvent::ProposalCreated(ProposalData {
             id: updated_draft.id.clone(),
             title: updated_draft.title.clone(),
             description: updated_draft.description.clone(),
             author: updated_draft.author.clone(),
             status: ProposalStatus::Pending,
-            voting_start: HLCTimestamp::now(),
-            voting_end: HLCTimestamp::now(),
+            voting_start: now.clone(),
+            voting_end: now,
             completion_time: None,
         });
         
@@ -1135,7 +1140,9 @@ impl GovernanceState {
                 return Err("No committee members available to submit proposal".to_string());
             }
 
-            // Send to first available committee member
+            // Send to committee members - try multiple for redundancy
+            let mut success = false;
+            let mut last_error = String::new();
             for member in committee_members.iter().take(3) { // Try up to 3 members
                 let target = Address::new(member, OUR_PROCESS);
 
@@ -1147,11 +1154,23 @@ impl GovernanceState {
 
                 match caller_utils::governance::handle_state_update_remote_rpc(&target, update).await {
                     Ok(Ok(_)) => {
-                        // Successfully submitted to committee
-                        break;
+                        logging::info!("Successfully submitted draft to committee member: {}", member);
+                        success = true;
+                        // Continue to try other members for redundancy
                     },
-                    _ => continue, // Try next member
+                    Ok(Err(e)) => {
+                        last_error = format!("Committee member {} rejected: {}", member, e);
+                        logging::error!("{}", last_error);
+                    },
+                    Err(e) => {
+                        last_error = format!("Failed to reach committee member {}: {:?}", member, e);
+                        logging::error!("{}", last_error);
+                    }
                 }
+            }
+            
+            if !success {
+                return Err(format!("Failed to submit draft to any committee member: {}", last_error));
             }
         } else {
             // We're a committee member, just broadcast normally
@@ -1767,25 +1786,51 @@ impl GovernanceState {
             };
 
             // Broadcast to ALL other committee members (use self.committee_members, not committee_state)
+            let mut committee_success = 0;
+            let mut committee_failure = 0;
             for member in &self.committee_members {
                 if member != &our().node && member != &sender {
                     let target = Address::new(member, OUR_PROCESS);
-                    logging::info!("Broadcasting update to committee member: {}", member);
-                    let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await;
+                    match caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await {
+                        Ok(Ok(_)) => {
+                            committee_success += 1;
+                            logging::info!("Successfully relayed to committee member: {}", member);
+                        },
+                        Ok(Err(e)) => {
+                            committee_failure += 1;
+                            logging::error!("Committee member {} rejected relay: {}", member, e);
+                        },
+                        Err(e) => {
+                            committee_failure += 1;
+                            logging::error!("Failed to relay to committee member {}: {:?}", member, e);
+                        }
+                    }
                 }
             }
+            logging::info!("Relay to committee: {} succeeded, {} failed", committee_success, committee_failure);
 
             // Also broadcast to all subscribers (non-committee DAO members)
-            println!("Broadcasting to {} subscribers", self.subscriptions.len());
+            logging::info!("Relaying to {} subscribers", self.subscriptions.len());
+            let mut sub_success = 0;
+            let mut sub_failure = 0;
             for subscription in self.subscriptions.values() {
-                println!("Sending update to subscriber: {}", subscription.subscriber);
                 let target = Address::new(&subscription.subscriber, OUR_PROCESS);
                 match caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await {
-                    Ok(Ok(_)) => println!("Successfully sent update to {}", subscription.subscriber),
-                    Ok(Err(e)) => println!("Subscriber {} rejected update: {}", subscription.subscriber, e),
-                    Err(e) => println!("Failed to send update to {}: {}", subscription.subscriber, e),
+                    Ok(Ok(_)) => {
+                        sub_success += 1;
+                        logging::debug!("Successfully relayed to subscriber {}", subscription.subscriber);
+                    },
+                    Ok(Err(e)) => {
+                        sub_failure += 1;
+                        logging::error!("Subscriber {} rejected relay: {}", subscription.subscriber, e);
+                    },
+                    Err(e) => {
+                        sub_failure += 1;
+                        logging::error!("Failed to relay to subscriber {}: {:?}", subscription.subscriber, e);
+                    }
                 }
             }
+            logging::info!("Relay to subscribers: {} succeeded, {} failed", sub_success, sub_failure);
         }
 
         Ok("ACK".to_string())
@@ -2187,11 +2232,25 @@ impl GovernanceState {
             };
 
             // Broadcast to committee members (both members and non-members can broadcast)
-            let _ = p2p_committee::broadcast_to_committee(
+            let broadcast_results = p2p_committee::broadcast_to_committee(
                 &committee_state.crdt.committee_members,
                 state_update,
                 Some(&our().node)
             ).await;
+            
+            // Log broadcast results
+            let mut success_count = 0;
+            let mut failure_count = 0;
+            for result in &broadcast_results {
+                match result {
+                    Ok(_) => success_count += 1,
+                    Err(e) => {
+                        failure_count += 1;
+                        logging::error!("Failed to broadcast to committee member: {}", e);
+                    }
+                }
+            }
+            logging::info!("Broadcast to committee: {} succeeded, {} failed", success_count, failure_count);
             
             // Also broadcast to subscribers if we're a committee member
             if committee_state.is_committee_member && !self.subscriptions.is_empty() {
@@ -2204,10 +2263,23 @@ impl GovernanceState {
                 // Log the event type being broadcast
                 logging::info!("Broadcasting {:?} event to subscribers", self.get_event_id(&event));
                 
+                let mut sub_success = 0;
+                let mut sub_failure = 0;
                 for subscription in self.subscriptions.values() {
                     let target = Address::new(&subscription.subscriber, OUR_PROCESS);
-                    let _ = caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await;
+                    match caller_utils::governance::handle_state_update_remote_rpc(&target, caller_update.clone()).await {
+                        Ok(Ok(_)) => sub_success += 1,
+                        Ok(Err(e)) => {
+                            sub_failure += 1;
+                            logging::error!("Subscriber {} rejected update: {}", subscription.subscriber, e);
+                        },
+                        Err(e) => {
+                            sub_failure += 1;
+                            logging::error!("Failed to send to subscriber {}: {:?}", subscription.subscriber, e);
+                        }
+                    }
                 }
+                logging::info!("Broadcast to subscribers: {} succeeded, {} failed", sub_success, sub_failure);
             }
         } else {
             // Fallback to old CRDT if committee state not initialized
